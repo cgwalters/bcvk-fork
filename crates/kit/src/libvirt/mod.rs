@@ -19,6 +19,7 @@ pub mod rm;
 pub mod run;
 pub mod ssh;
 pub mod start;
+pub mod status;
 pub mod stop;
 pub mod upload;
 
@@ -51,6 +52,9 @@ pub enum LibvirtCommands {
     /// Show detailed information about a libvirt domain
     Inspect(inspect::LibvirtInspectOpts),
 
+    /// Show libvirt environment status and capabilities
+    Status(status::LibvirtStatusOpts),
+
     /// Upload bootc disk images to libvirt with metadata annotations
     Upload(upload::LibvirtUploadOpts),
 
@@ -69,6 +73,7 @@ impl LibvirtCommands {
             LibvirtCommands::Start(opts) => start::run(opts),
             LibvirtCommands::Remove(opts) => rm::run(opts),
             LibvirtCommands::Inspect(opts) => inspect::run(opts),
+            LibvirtCommands::Status(opts) => status::run(opts),
             LibvirtCommands::Upload(opts) => upload::run(opts),
             LibvirtCommands::Create(opts) => create::run(opts),
         }

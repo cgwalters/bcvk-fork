@@ -11,6 +11,17 @@ use color_eyre::{eyre::eyre, Result};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+/// Configuration for a virtiofs filesystem mount
+#[derive(Debug, Clone)]
+pub struct VirtiofsFilesystem {
+    /// Host directory to share
+    pub source_dir: String,
+    /// Unique tag identifier for the filesystem
+    pub tag: String,
+    /// Whether the filesystem is read-only
+    pub readonly: bool,
+}
+
 /// Builder for creating libvirt domain XML configurations
 #[derive(Debug)]
 pub struct DomainBuilder {
@@ -24,6 +35,7 @@ pub struct DomainBuilder {
     kernel_args: Option<String>,
     metadata: HashMap<String, String>,
     qemu_args: Vec<String>,
+    virtiofs_filesystems: Vec<VirtiofsFilesystem>,
 }
 
 impl Default for DomainBuilder {
@@ -46,6 +58,7 @@ impl DomainBuilder {
             kernel_args: None,
             metadata: HashMap::new(),
             qemu_args: Vec::new(),
+            virtiofs_filesystems: Vec::new(),
         }
     }
 
@@ -100,6 +113,12 @@ impl DomainBuilder {
     /// Add QEMU command line arguments
     pub fn with_qemu_args(mut self, args: Vec<String>) -> Self {
         self.qemu_args = args;
+        self
+    }
+
+    /// Add a virtiofs filesystem mount
+    pub fn with_virtiofs_filesystem(mut self, filesystem: VirtiofsFilesystem) -> Self {
+        self.virtiofs_filesystems.push(filesystem);
         self
     }
 
@@ -159,6 +178,12 @@ impl DomainBuilder {
         }
 
         writer.end_element("os")?;
+
+        // Add memory backing for shared memory support (required for virtiofs)
+        writer.start_element("memoryBacking", &[])?;
+        writer.write_empty_element("source", &[("type", "memfd")])?;
+        writer.write_empty_element("access", &[("mode", "shared")])?;
+        writer.end_element("memoryBacking")?;
 
         // Architecture-specific features
         arch_config.write_features(&mut writer)?;
@@ -241,6 +266,21 @@ impl DomainBuilder {
             writer.start_element("video", &[])?;
             writer.write_empty_element("model", &[("type", "vga")])?;
             writer.end_element("video")?;
+        }
+
+        // Virtiofs filesystems
+        for filesystem in &self.virtiofs_filesystems {
+            writer.start_element(
+                "filesystem",
+                &[("type", "mount"), ("accessmode", "passthrough")],
+            )?;
+            writer.write_empty_element("driver", &[("type", "virtiofs"), ("queue", "1024")])?;
+            if filesystem.readonly {
+                writer.write_empty_element("readonly", &[])?;
+            }
+            writer.write_empty_element("source", &[("dir", &filesystem.source_dir)])?;
+            writer.write_empty_element("target", &[("dir", &filesystem.tag)])?;
+            writer.end_element("filesystem")?;
         }
 
         writer.end_element("devices")?;
@@ -395,5 +435,46 @@ mod tests {
         assert!(xml.contains("<features>"));
         assert!(xml.contains("<acpi/>"));
         assert!(xml.contains("<timer name=\"rtc\""));
+    }
+
+    #[test]
+    fn test_virtiofs_filesystem_configuration() {
+        // Test read-write virtiofs filesystem
+        let filesystem_rw = VirtiofsFilesystem {
+            source_dir: "/host/path".to_string(),
+            tag: "testtag".to_string(),
+            readonly: false,
+        };
+
+        let xml_rw = DomainBuilder::new()
+            .with_name("test-virtiofs")
+            .with_virtiofs_filesystem(filesystem_rw)
+            .build_xml()
+            .unwrap();
+
+        assert!(xml_rw.contains("filesystem type=\"mount\" accessmode=\"passthrough\""));
+        assert!(xml_rw.contains("driver type=\"virtiofs\" queue=\"1024\""));
+        assert!(xml_rw.contains("source dir=\"/host/path\""));
+        assert!(xml_rw.contains("target dir=\"testtag\""));
+        assert!(!xml_rw.contains("<readonly/>"));
+
+        // Test read-only virtiofs filesystem
+        let filesystem_ro = VirtiofsFilesystem {
+            source_dir: "/host/storage".to_string(),
+            tag: "hoststorage".to_string(),
+            readonly: true,
+        };
+
+        let xml_ro = DomainBuilder::new()
+            .with_name("test-virtiofs-ro")
+            .with_virtiofs_filesystem(filesystem_ro)
+            .build_xml()
+            .unwrap();
+
+        assert!(xml_ro.contains("filesystem type=\"mount\" accessmode=\"passthrough\""));
+        assert!(xml_ro.contains("driver type=\"virtiofs\" queue=\"1024\""));
+        assert!(xml_ro.contains("<readonly/>"));
+        assert!(xml_ro.contains("source dir=\"/host/storage\""));
+        assert!(xml_ro.contains("target dir=\"hoststorage\""));
     }
 }
