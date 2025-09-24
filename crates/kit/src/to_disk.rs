@@ -175,6 +175,8 @@ impl ToDiskOpts {
             "to-disk",
             // Default to being a generic image here, if someone cares they can override this
             "--generic-image",
+            // The default in newer versions, but support older ones too
+            "--skip-fetch-check",
             "--source-imgref",
         ]
         .into_iter()
