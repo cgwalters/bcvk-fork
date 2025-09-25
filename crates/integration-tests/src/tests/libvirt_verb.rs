@@ -382,6 +382,58 @@ fn cleanup_domain(domain_name: &str) {
     }
 }
 
+/// Wait for SSH to become available on a domain with a timeout
+fn wait_for_ssh_available(
+    bck: &str,
+    domain_name: &str,
+    timeout_secs: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let start_time = std::time::Instant::now();
+    let timeout_duration = std::time::Duration::from_secs(timeout_secs);
+
+    println!(
+        "Waiting for SSH to become available on domain: {}",
+        domain_name
+    );
+
+    loop {
+        // Try a simple SSH command to test connectivity
+        let ssh_test = Command::new("timeout")
+            .args([
+                "10s", // Short timeout for individual SSH attempts
+                bck,
+                "libvirt",
+                "ssh",
+                domain_name,
+                "--",
+                "echo",
+                "ssh-ready",
+            ])
+            .output();
+
+        match ssh_test {
+            Ok(output) if output.status.success() => {
+                println!("✓ SSH is now available");
+                return Ok(());
+            }
+            Ok(_) => {
+                // SSH command failed, but that's expected while VM is booting
+            }
+            Err(e) => {
+                println!("SSH test error (expected while booting): {}", e);
+            }
+        }
+
+        // Check if we've exceeded the timeout
+        if start_time.elapsed() >= timeout_duration {
+            return Err(format!("Timeout waiting for SSH after {} seconds", timeout_secs).into());
+        }
+
+        // Wait 5 seconds before next attempt
+        std::thread::sleep(std::time::Duration::from_secs(5));
+    }
+}
+
 /// Test VM startup and shutdown with libvirt run
 pub fn test_libvirt_vm_lifecycle() {
     // Skip if running in CI/container environment without libvirt
@@ -509,6 +561,239 @@ pub fn test_libvirt_vm_lifecycle() {
     }
 
     println!("VM lifecycle test completed");
+}
+
+/// Test container storage binding functionality end-to-end
+pub fn test_libvirt_bind_storage_ro() {
+    let bck = get_bck_command().unwrap();
+    let test_image = get_test_image();
+
+    // First check if libvirt supports readonly virtiofs
+    println!("Checking libvirt capabilities...");
+    let status_output = Command::new(&bck)
+        .args(&["libvirt", "status", "--format", "json"])
+        .output()
+        .expect("Failed to get libvirt status");
+
+    if !status_output.status.success() {
+        let stderr = String::from_utf8_lossy(&status_output.stderr);
+        panic!("Failed to get libvirt status: {}", stderr);
+    }
+
+    let status: serde_json::Value =
+        serde_json::from_slice(&status_output.stdout).expect("Failed to parse libvirt status JSON");
+
+    let supports_readonly = status["supports_readonly_virtiofs"]
+        .as_bool()
+        .expect("Missing supports_readonly_virtiofs field in status output");
+
+    if !supports_readonly {
+        println!("Skipping test: libvirt does not support readonly virtiofs");
+        println!("libvirt version: {:?}", status["version"]);
+        println!("Requires libvirt 11.0+ for readonly virtiofs support");
+        return;
+    }
+
+    // Generate unique domain name for this test
+    let domain_name = format!(
+        "test-bind-storage-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    );
+
+    println!("Testing --bind-storage-ro with domain: {}", domain_name);
+
+    // Cleanup any existing domain with this name
+    let _ = Command::new("virsh")
+        .args(&["destroy", &domain_name])
+        .output();
+    let _ = Command::new("virsh")
+        .args(&["undefine", &domain_name])
+        .output();
+
+    // Create domain with --bind-storage-ro flag
+    println!("Creating libvirt domain with --bind-storage-ro...");
+    let create_output = Command::new("timeout")
+        .args([
+            "300s", // 5 minute timeout for domain creation
+            &bck,
+            "libvirt",
+            "run",
+            "--name",
+            &domain_name,
+            "--bind-storage-ro",
+            "--filesystem",
+            "ext4",
+            &test_image,
+        ])
+        .output()
+        .expect("Failed to run libvirt run with --bind-storage-ro");
+
+    let create_stdout = String::from_utf8_lossy(&create_output.stdout);
+    let create_stderr = String::from_utf8_lossy(&create_output.stderr);
+
+    println!("Create stdout: {}", create_stdout);
+    println!("Create stderr: {}", create_stderr);
+
+    if !create_output.status.success() {
+        cleanup_domain(&domain_name);
+        panic!(
+            "Failed to create domain with --bind-storage-ro: {}",
+            create_stderr
+        );
+    }
+
+    println!("Successfully created domain: {}", domain_name);
+
+    // Check that the domain was created with virtiofs filesystem
+    println!("Checking domain XML for virtiofs filesystem...");
+    let dumpxml_output = Command::new("virsh")
+        .args(&["dumpxml", &domain_name])
+        .output()
+        .expect("Failed to dump domain XML");
+
+    if !dumpxml_output.status.success() {
+        cleanup_domain(&domain_name);
+        let stderr = String::from_utf8_lossy(&dumpxml_output.stderr);
+        panic!("Failed to dump domain XML: {}", stderr);
+    }
+
+    let domain_xml = String::from_utf8_lossy(&dumpxml_output.stdout);
+    println!(
+        "Domain XML snippet: {}",
+        &domain_xml[..std::cmp::min(500, domain_xml.len())]
+    );
+
+    // Verify that the domain XML contains virtiofs configuration
+    assert!(
+        domain_xml.contains("type='virtiofs'") || domain_xml.contains("driver type='virtiofs'"),
+        "Domain XML should contain virtiofs filesystem configuration"
+    );
+
+    // Verify that the filesystem has the correct tag
+    assert!(
+        domain_xml.contains("hoststorage") || domain_xml.contains("dir='hoststorage'"),
+        "Domain XML should reference the hoststorage tag for container storage"
+    );
+
+    // Verify that the domain XML contains readonly element for virtiofs
+    assert!(
+        domain_xml.contains("<readonly/>"),
+        "Domain XML should contain readonly element for --bind-storage-ro"
+    );
+
+    // Check metadata for bind-storage-ro configuration
+    if domain_xml.contains("bootc:bind-storage-ro") {
+        assert!(
+            domain_xml.contains("<bootc:bind-storage-ro>true</bootc:bind-storage-ro>"),
+            "Domain metadata should indicate bind-storage-ro is enabled"
+        );
+    }
+
+    println!("✓ Domain XML contains expected virtiofs configuration");
+    println!("✓ Container storage mount is configured as read-only");
+    println!("✓ hoststorage tag is present in filesystem configuration");
+
+    // Wait for VM to boot and SSH to become available
+    if let Err(e) = wait_for_ssh_available(&bck, &domain_name, 180) {
+        cleanup_domain(&domain_name);
+        panic!("Failed to establish SSH connection: {}", e);
+    }
+
+    // Create mount point and mount virtiofs filesystem
+    println!("Creating mount point and mounting virtiofs filesystem...");
+    let mount_setup = Command::new("timeout")
+        .args([
+            "30s",
+            &bck,
+            "libvirt",
+            "ssh",
+            &domain_name,
+            "--",
+            "sudo",
+            "mkdir",
+            "-p",
+            "/run/virtiofs-mnt-hoststorage",
+        ])
+        .output()
+        .expect("Failed to create mount point");
+
+    if !mount_setup.status.success() {
+        let stderr = String::from_utf8_lossy(&mount_setup.stderr);
+        println!("Warning: Failed to create mount point: {}", stderr);
+    }
+
+    let mount_cmd = Command::new("timeout")
+        .args([
+            "30s",
+            &bck,
+            "libvirt",
+            "ssh",
+            &domain_name,
+            "--",
+            "sudo",
+            "mount",
+            "-t",
+            "virtiofs",
+            "hoststorage",
+            "/run/virtiofs-mnt-hoststorage",
+        ])
+        .output()
+        .expect("Failed to mount virtiofs");
+
+    if !mount_cmd.status.success() {
+        cleanup_domain(&domain_name);
+        let stderr = String::from_utf8_lossy(&mount_cmd.stderr);
+        panic!("Failed to mount virtiofs filesystem: {}", stderr);
+    }
+
+    // Test SSH connection and verify container storage mount inside VM
+    println!("Testing SSH connection and checking container storage mount...");
+    let st = Command::new("timeout")
+        .args([
+            "60s",
+            &bck,
+            "libvirt",
+            "ssh",
+            &domain_name,
+            "--",
+            "ls",
+            "-la",
+            "/run/virtiofs-mnt-hoststorage/overlay",
+        ])
+        .status()
+        .expect("Failed to run SSH command to check container storage");
+
+    assert!(st.success());
+
+    // Verify that the mount is read-only
+    println!("Verifying that the mount is read-only...");
+    let ro_test_st = Command::new("timeout")
+        .args([
+            "30s",
+            &bck,
+            "libvirt",
+            "ssh",
+            &domain_name,
+            "--",
+            "touch",
+            "/run/virtiofs-mnt-hoststorage/test-write",
+        ])
+        .status()
+        .expect("Failed to run SSH command to test read-only mount");
+
+    assert!(
+        !ro_test_st.success(),
+        "Mount should be read-only, but write operation succeeded"
+    );
+    println!("✓ Mount is correctly configured as read-only.");
+
+    // Cleanup domain before completing test
+    cleanup_domain(&domain_name);
+
+    println!("✓ --bind-storage-ro end-to-end test passed");
 }
 
 /// Test error handling for invalid configurations
