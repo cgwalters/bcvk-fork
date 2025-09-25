@@ -18,16 +18,15 @@ pub struct LibvirtInspectOpts {
 }
 
 /// Execute the libvirt inspect command
-pub fn run(opts: LibvirtInspectOpts) -> Result<()> {
-    inspect_vm_impl(opts)
-}
-
-/// Show detailed information about a VM (implementation)
-pub fn inspect_vm_impl(opts: LibvirtInspectOpts) -> Result<()> {
+pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtInspectOpts) -> Result<()> {
     use crate::domain_list::DomainLister;
     use color_eyre::eyre::Context;
 
-    let lister = DomainLister::new();
+    let connect_uri = global_opts.connect.as_ref();
+    let lister = match connect_uri {
+        Some(uri) => DomainLister::with_connection(uri.clone()),
+        None => DomainLister::new(),
+    };
 
     // Get domain info
     let vm = lister

@@ -8,7 +8,6 @@
 //! - `list-volumes`: List available bootc volumes with metadata
 
 use clap::Subcommand;
-use color_eyre::Result;
 
 pub mod create;
 pub mod domain;
@@ -23,9 +22,27 @@ pub mod status;
 pub mod stop;
 pub mod upload;
 
+/// Global options for libvirt operations
+#[derive(Debug, Clone, Default)]
+pub struct LibvirtOptions {
+    /// Hypervisor connection URI (e.g., qemu:///system, qemu+ssh://host/system)
+    pub connect: Option<String>,
+}
+
+impl LibvirtOptions {
+    /// Create a virsh Command with the appropriate connection URI
+    pub fn virsh_command(&self) -> std::process::Command {
+        let mut cmd = std::process::Command::new("virsh");
+        if let Some(ref uri) = self.connect {
+            cmd.arg("-c").arg(uri);
+        }
+        cmd
+    }
+}
+
 /// libvirt subcommands for managing bootc disk images and domains
 #[derive(Debug, Subcommand)]
-pub enum LibvirtCommands {
+pub enum LibvirtSubcommands {
     /// Run a bootable container as a persistent VM
     Run(run::LibvirtRunOpts),
 
@@ -60,22 +77,4 @@ pub enum LibvirtCommands {
 
     /// Create and start domains from uploaded bootc volumes
     Create(create::LibvirtCreateOpts),
-}
-
-impl LibvirtCommands {
-    pub fn run(self) -> Result<()> {
-        match self {
-            LibvirtCommands::Run(opts) => run::run(opts),
-            LibvirtCommands::Ssh(opts) => ssh::run(opts),
-            LibvirtCommands::List(opts) => list::run(opts),
-            LibvirtCommands::ListVolumes(opts) => list_volumes::run(opts),
-            LibvirtCommands::Stop(opts) => stop::run(opts),
-            LibvirtCommands::Start(opts) => start::run(opts),
-            LibvirtCommands::Remove(opts) => rm::run(opts),
-            LibvirtCommands::Inspect(opts) => inspect::run(opts),
-            LibvirtCommands::Status(opts) => status::run(opts),
-            LibvirtCommands::Upload(opts) => upload::run(opts),
-            LibvirtCommands::Create(opts) => create::run(opts),
-        }
-    }
 }

@@ -22,17 +22,15 @@ pub struct LibvirtStopOpts {
 }
 
 /// Execute the libvirt stop command
-pub fn run(opts: LibvirtStopOpts) -> Result<()> {
-    stop_vm_impl(opts)
-}
-
-/// Stop a running VM (implementation)
-pub fn stop_vm_impl(opts: LibvirtStopOpts) -> Result<()> {
+pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtStopOpts) -> Result<()> {
     use crate::domain_list::DomainLister;
     use color_eyre::eyre::Context;
-    use std::process::Command;
 
-    let lister = DomainLister::new();
+    let connect_uri = global_opts.connect.as_ref();
+    let lister = match connect_uri {
+        Some(uri) => DomainLister::with_connection(uri.clone()),
+        None => DomainLister::new(),
+    };
 
     // Check if domain exists and get its state
     let state = lister
@@ -47,7 +45,7 @@ pub fn stop_vm_impl(opts: LibvirtStopOpts) -> Result<()> {
     println!("🛑 Stopping VM '{}'...", opts.name);
 
     // Use virsh to stop the domain
-    let mut cmd = Command::new("virsh");
+    let mut cmd = global_opts.virsh_command();
     if opts.force {
         cmd.args(&["destroy", &opts.name]);
     } else {

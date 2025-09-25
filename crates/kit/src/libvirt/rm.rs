@@ -22,17 +22,15 @@ pub struct LibvirtRmOpts {
 }
 
 /// Execute the libvirt rm command
-pub fn run(opts: LibvirtRmOpts) -> Result<()> {
-    remove_vm_impl(opts)
-}
-
-/// Remove a VM and its resources (implementation)
-pub fn remove_vm_impl(opts: LibvirtRmOpts) -> Result<()> {
+pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRmOpts) -> Result<()> {
     use crate::domain_list::DomainLister;
     use color_eyre::eyre::Context;
-    use std::process::Command;
 
-    let lister = DomainLister::new();
+    let connect_uri = global_opts.connect.as_ref();
+    let lister = match connect_uri {
+        Some(uri) => DomainLister::with_connection(uri.clone()),
+        None => DomainLister::new(),
+    };
 
     // Check if domain exists and get its state
     let state = lister
@@ -48,7 +46,8 @@ pub fn remove_vm_impl(opts: LibvirtRmOpts) -> Result<()> {
     if state == "running" {
         if opts.stop {
             println!("🛑 Stopping running VM '{}'...", opts.name);
-            let output = Command::new("virsh")
+            let output = global_opts
+                .virsh_command()
                 .args(&["destroy", &opts.name])
                 .output()
                 .with_context(|| "Failed to stop VM before removal")?;
@@ -91,7 +90,8 @@ pub fn remove_vm_impl(opts: LibvirtRmOpts) -> Result<()> {
 
     // Remove libvirt domain
     println!("  Removing libvirt domain...");
-    let output = Command::new("virsh")
+    let output = global_opts
+        .virsh_command()
         .args(&["undefine", &opts.name, "--remove-all-storage"])
         .output()
         .with_context(|| "Failed to undefine libvirt domain")?;

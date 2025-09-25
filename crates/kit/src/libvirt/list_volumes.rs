@@ -33,10 +33,6 @@ pub struct LibvirtListVolumesOpts {
     /// Show all volumes (not just bootc volumes)
     #[clap(long)]
     pub all: bool,
-
-    /// Hypervisor connection URI (e.g., qemu:///system, qemu+ssh://host/system)
-    #[clap(short = 'c', long = "connect")]
-    pub connect: Option<String>,
 }
 
 /// Information about a bootc volume
@@ -76,18 +72,14 @@ impl BootcVolume {
 
 impl LibvirtListVolumesOpts {
     /// Build a virsh command with optional connection URI
-    fn virsh_command(&self) -> Command {
-        let mut cmd = Command::new("virsh");
-        if let Some(ref connect) = self.connect {
-            cmd.arg("-c").arg(connect);
-        }
-        cmd
+    fn virsh_command(&self, global_opts: &crate::libvirt::LibvirtOptions) -> Command {
+        global_opts.virsh_command()
     }
 
     /// Check if storage pool exists and is accessible
-    fn check_pool_exists(&self) -> Result<()> {
+    fn check_pool_exists(&self, global_opts: &crate::libvirt::LibvirtOptions) -> Result<()> {
         let output = self
-            .virsh_command()
+            .virsh_command(global_opts)
             .args(&["pool-info", &self.pool])
             .output()?;
 
@@ -104,9 +96,12 @@ impl LibvirtListVolumesOpts {
     }
 
     /// List all volumes in the storage pool
-    pub fn list_pool_volumes(&self) -> Result<Vec<String>> {
+    pub fn list_pool_volumes(
+        &self,
+        global_opts: &crate::libvirt::LibvirtOptions,
+    ) -> Result<Vec<String>> {
         let output = self
-            .virsh_command()
+            .virsh_command(global_opts)
             .args(&["vol-list", &self.pool])
             .output()?;
 
@@ -138,10 +133,14 @@ impl LibvirtListVolumesOpts {
     }
 
     /// Get volume information including metadata
-    pub fn get_volume_info(&self, volume_name: &str) -> Result<BootcVolume> {
+    pub fn get_volume_info(
+        &self,
+        global_opts: &crate::libvirt::LibvirtOptions,
+        volume_name: &str,
+    ) -> Result<BootcVolume> {
         // Get volume path
         let path_output = self
-            .virsh_command()
+            .virsh_command(global_opts)
             .args(&["vol-path", volume_name, "--pool", &self.pool])
             .output()?;
 
@@ -153,7 +152,7 @@ impl LibvirtListVolumesOpts {
 
         // Get volume info (size, format)
         let info_output = self
-            .virsh_command()
+            .virsh_command(global_opts)
             .args(&["vol-info", volume_name, "--pool", &self.pool])
             .output()?;
 
@@ -179,7 +178,7 @@ impl LibvirtListVolumesOpts {
 
         // Get metadata from volume XML
         let xml_output = self
-            .virsh_command()
+            .virsh_command(global_opts)
             .args(&["vol-dumpxml", volume_name, "--pool", &self.pool])
             .output()?;
 
@@ -388,14 +387,17 @@ fn format_size(bytes: u64) -> String {
 }
 
 /// Execute the libvirt volume listing process
-pub fn run(opts: LibvirtListVolumesOpts) -> Result<()> {
+pub fn run(
+    global_opts: &crate::libvirt::LibvirtOptions,
+    opts: LibvirtListVolumesOpts,
+) -> Result<()> {
     debug!("Listing volumes in libvirt pool: {}", opts.pool);
 
     // Phase 1: Check pool exists
-    opts.check_pool_exists()?;
+    opts.check_pool_exists(global_opts)?;
 
     // Phase 2: List all volumes in pool
-    let volume_names = opts.list_pool_volumes()?;
+    let volume_names = opts.list_pool_volumes(global_opts)?;
 
     if volume_names.is_empty() {
         if opts.json {
@@ -414,7 +416,7 @@ pub fn run(opts: LibvirtListVolumesOpts) -> Result<()> {
     // Phase 3: Get detailed info for each volume
     let mut volumes = Vec::new();
     for volume_name in volume_names {
-        match opts.get_volume_info(&volume_name) {
+        match opts.get_volume_info(global_opts, &volume_name) {
             Ok(volume_info) => volumes.push(volume_info),
             Err(e) => {
                 warn!("Failed to get info for volume '{}': {}", volume_name, e);

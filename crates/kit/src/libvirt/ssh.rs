@@ -22,10 +22,6 @@ pub struct LibvirtSshOpts {
     /// Name of the libvirt domain to connect to
     pub domain_name: String,
 
-    /// Hypervisor connection URI (e.g., qemu:///system, qemu+ssh://host/system)
-    #[clap(short = 'c', long = "connect")]
-    pub connect: Option<String>,
-
     /// SSH username to use for connection (defaults to 'root')
     #[clap(long, default_value = "root")]
     pub user: String,
@@ -51,18 +47,9 @@ struct DomainSshConfig {
 }
 
 impl LibvirtSshOpts {
-    /// Build a virsh command with optional connection URI
-    fn virsh_command(&self) -> Command {
-        let mut cmd = Command::new("virsh");
-        if let Some(ref connect) = self.connect {
-            cmd.arg("-c").arg(connect);
-        }
-        cmd
-    }
-
     /// Check if domain exists and is accessible
-    fn check_domain_exists(&self) -> Result<bool> {
-        let output = self
+    fn check_domain_exists(&self, global_opts: &crate::libvirt::LibvirtOptions) -> Result<bool> {
+        let output = global_opts
             .virsh_command()
             .args(&["dominfo", &self.domain_name])
             .output()?;
@@ -71,8 +58,8 @@ impl LibvirtSshOpts {
     }
 
     /// Get domain state
-    fn get_domain_state(&self) -> Result<String> {
-        let output = self
+    fn get_domain_state(&self, global_opts: &crate::libvirt::LibvirtOptions) -> Result<String> {
+        let output = global_opts
             .virsh_command()
             .args(&["domstate", &self.domain_name])
             .output()?;
@@ -86,8 +73,11 @@ impl LibvirtSshOpts {
     }
 
     /// Extract SSH configuration from domain XML metadata
-    fn extract_ssh_config(&self) -> Result<DomainSshConfig> {
-        let output = self
+    fn extract_ssh_config(
+        &self,
+        global_opts: &crate::libvirt::LibvirtOptions,
+    ) -> Result<DomainSshConfig> {
+        let output = global_opts
             .virsh_command()
             .args(&["dumpxml", &self.domain_name])
             .output()?;
@@ -329,16 +319,24 @@ impl LibvirtSshOpts {
 }
 
 /// Execute the libvirt SSH command
-pub fn run(opts: LibvirtSshOpts) -> Result<()> {
+pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtSshOpts) -> Result<()> {
+    run_ssh_impl(global_opts, opts)
+}
+
+/// SSH implementation
+pub fn run_ssh_impl(
+    global_opts: &crate::libvirt::LibvirtOptions,
+    opts: LibvirtSshOpts,
+) -> Result<()> {
     debug!("Connecting to libvirt domain: {}", opts.domain_name);
 
     // Check if domain exists
-    if !opts.check_domain_exists()? {
+    if !opts.check_domain_exists(global_opts)? {
         return Err(eyre!("Domain '{}' not found", opts.domain_name));
     }
 
     // Check if domain is running
-    let state = opts.get_domain_state()?;
+    let state = opts.get_domain_state(global_opts)?;
     if state != "running" {
         return Err(eyre!(
             "Domain '{}' is not running (current state: {}). Start it first with: virsh start {}",
@@ -349,7 +347,7 @@ pub fn run(opts: LibvirtSshOpts) -> Result<()> {
     }
 
     // Extract SSH configuration from domain metadata
-    let ssh_config = opts.extract_ssh_config()?;
+    let ssh_config = opts.extract_ssh_config(global_opts)?;
 
     // Connect via SSH
     opts.connect_ssh(&ssh_config)?;

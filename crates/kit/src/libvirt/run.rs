@@ -67,17 +67,16 @@ pub struct LibvirtRunOpts {
 }
 
 /// Execute the libvirt run command
-pub fn run(opts: LibvirtRunOpts) -> Result<()> {
-    run_vm_impl(opts)
-}
-
-/// Create and run a bootable container VM (implementation)
-pub fn run_vm_impl(opts: LibvirtRunOpts) -> Result<()> {
+pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -> Result<()> {
     use crate::install_options::InstallOptions;
     use crate::run_ephemeral::CommonVmOpts;
     use crate::to_disk::ToDiskOpts;
 
-    let lister = DomainLister::new();
+    let connect_uri = global_opts.connect.as_ref();
+    let lister = match connect_uri {
+        Some(uri) => DomainLister::with_connection(uri.clone()),
+        None => DomainLister::new(),
+    };
     let existing_domains = lister
         .list_all_domains()
         .with_context(|| "Failed to list existing domains")?;
@@ -99,8 +98,8 @@ pub fn run_vm_impl(opts: LibvirtRunOpts) -> Result<()> {
     );
 
     // Create disk path in the standard libvirt images directory
-    let disk_path =
-        create_disk_path(&vm_name, &opts.image).with_context(|| "Failed to create disk path")?;
+    let disk_path = create_disk_path(&vm_name, &opts.image, connect_uri)
+        .with_context(|| "Failed to create disk path")?;
 
     // Phase 1: Create bootable disk image using to_disk
     println!("📀 Creating bootable disk image...");
@@ -138,7 +137,7 @@ pub fn run_vm_impl(opts: LibvirtRunOpts) -> Result<()> {
     println!("Creating libvirt domain...");
 
     // Create the domain directly (simpler than using libvirt/create for files)
-    create_libvirt_domain_from_disk(&vm_name, &disk_path, &opts)
+    create_libvirt_domain_from_disk(&vm_name, &disk_path, &opts, global_opts)
         .with_context(|| "Failed to create libvirt domain")?;
 
     // VM is now managed by libvirt, no need to track separately
@@ -153,13 +152,12 @@ pub fn run_vm_impl(opts: LibvirtRunOpts) -> Result<()> {
         // Use the libvirt SSH functionality directly
         let ssh_opts = crate::libvirt::ssh::LibvirtSshOpts {
             domain_name: vm_name,
-            connect: None,
             user: "root".to_string(),
             command: vec![],
             strict_host_keys: false,
             timeout: 30,
         };
-        crate::libvirt::ssh::run(ssh_opts)
+        crate::libvirt::ssh::run(global_opts, ssh_opts)
     } else {
         println!("\nUse 'bcvk libvirt ssh {}' to connect", vm_name);
         Ok(())
@@ -167,8 +165,30 @@ pub fn run_vm_impl(opts: LibvirtRunOpts) -> Result<()> {
 }
 
 /// Get the path of the default libvirt storage pool
-fn get_libvirt_storage_pool_path() -> Result<Utf8PathBuf> {
+fn get_libvirt_storage_pool_path(connect_uri: Option<&String>) -> Result<Utf8PathBuf> {
     use std::process::Command;
+
+    // If a specific connection URI is provided, use it
+    if let Some(uri) = connect_uri {
+        let output = Command::new("virsh")
+            .args(&["-c", uri, "pool-dumpxml", "default"])
+            .output()
+            .with_context(|| "Failed to query libvirt storage pool")?;
+
+        if output.status.success() {
+            let xml = String::from_utf8(output.stdout)
+                .with_context(|| "Invalid UTF-8 in virsh output")?;
+            let dom = xml_utils::parse_xml_dom(&xml)
+                .with_context(|| "Failed to parse storage pool XML")?;
+
+            if let Some(path_node) = dom.find("path") {
+                let path_str = path_node.text_content().trim();
+                if !path_str.is_empty() {
+                    return Ok(Utf8PathBuf::from(path_str));
+                }
+            }
+        }
+    }
 
     // Try user session first (qemu:///session)
     let output = Command::new("virsh")
@@ -250,9 +270,13 @@ fn generate_unique_vm_name(image: &str, existing_domains: &[String]) -> String {
 }
 
 /// Create disk path for a VM using image hash as suffix
-fn create_disk_path(vm_name: &str, source_image: &str) -> Result<Utf8PathBuf> {
+fn create_disk_path(
+    vm_name: &str,
+    source_image: &str,
+    connect_uri: Option<&String>,
+) -> Result<Utf8PathBuf> {
     // Query libvirt for the default storage pool path
-    let base_dir = get_libvirt_storage_pool_path().unwrap_or_else(|_| {
+    let base_dir = get_libvirt_storage_pool_path(connect_uri).unwrap_or_else(|_| {
         // Fallback to standard paths if we can't query libvirt
         if let Ok(home) = std::env::var("HOME") {
             Utf8PathBuf::from(home).join(".local/share/libvirt/images")
@@ -355,11 +379,11 @@ fn create_libvirt_domain_from_disk(
     domain_name: &str,
     disk_path: &Utf8Path,
     opts: &LibvirtRunOpts,
+    global_opts: &crate::libvirt::LibvirtOptions,
 ) -> Result<()> {
     use crate::libvirt::domain::DomainBuilder;
     use crate::ssh::generate_ssh_keypair;
     use crate::sshcred::smbios_cred_for_root_ssh;
-    use std::process::Command;
     use tracing::debug;
 
     // Generate SSH keypair for the domain
@@ -463,7 +487,8 @@ fn create_libvirt_domain_from_disk(
     std::fs::write(&xml_path, domain_xml).with_context(|| "Failed to write domain XML")?;
 
     // Define the domain
-    let output = Command::new("virsh")
+    let output = global_opts
+        .virsh_command()
         .args(&["define", &xml_path])
         .output()
         .with_context(|| "Failed to run virsh define")?;
@@ -477,7 +502,8 @@ fn create_libvirt_domain_from_disk(
     }
 
     // Start the domain by default (compatibility)
-    let output = Command::new("virsh")
+    let output = global_opts
+        .virsh_command()
         .args(&["start", domain_name])
         .output()
         .with_context(|| "Failed to start domain")?;
