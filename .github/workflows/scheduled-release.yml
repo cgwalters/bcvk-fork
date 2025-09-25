@@ -21,11 +21,18 @@ jobs:
   create-release-pr:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
 
       - name: Check if it's time for a release
         id: check_schedule
@@ -91,7 +98,7 @@ jobs:
         env:
           VERSION: ${{ steps.create_commit.outputs.VERSION }}
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           title: "Release ${{ env.VERSION }}"
           commit-message: "Release ${{ env.VERSION }}"
           branch: "release-${{ env.VERSION }}"
