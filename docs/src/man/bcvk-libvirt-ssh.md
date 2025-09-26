@@ -23,10 +23,6 @@ SSH to libvirt domain with embedded SSH key
 
     Command to execute on remote host
 
-**-c**, **--connect**=*CONNECT*
-
-    Hypervisor connection URI (e.g., qemu:///system, qemu+ssh://host/system)
-
 **--user**=*USER*
 
     SSH username to use for connection (defaults to 'root')
