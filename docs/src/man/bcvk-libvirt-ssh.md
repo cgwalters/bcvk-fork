@@ -39,6 +39,16 @@ SSH to libvirt domain with embedded SSH key
 
     Default: 30
 
+**--log-level**=*LOG_LEVEL*
+
+    SSH log level
+
+    Default: ERROR
+
+**--extra-options**=*EXTRA_OPTIONS*
+
+    Extra SSH options in key=value format
+
 <!-- END GENERATED OPTIONS -->
 
 # EXAMPLES
