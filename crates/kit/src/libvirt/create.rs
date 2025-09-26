@@ -57,10 +57,6 @@ pub struct LibvirtCreateOpts {
     #[clap(long)]
     pub vnc: bool,
 
-    /// Hypervisor connection URI (e.g., qemu:///system, qemu+ssh://host/system)
-    #[clap(short = 'c', long = "connect")]
-    pub connect: Option<String>,
-
     /// VNC port (default: auto-assign)
     #[clap(long)]
     pub vnc_port: Option<u16>,
@@ -123,12 +119,8 @@ pub struct SshConfig {
 
 impl LibvirtCreateOpts {
     /// Build a virsh command with optional connection URI
-    fn virsh_command(&self) -> Command {
-        let mut cmd = Command::new("virsh");
-        if let Some(ref connect) = self.connect {
-            cmd.arg("-c").arg(connect);
-        }
-        cmd
+    fn virsh_command(&self, global_opts: &crate::libvirt::LibvirtOptions) -> Command {
+        global_opts.virsh_command()
     }
 
     /// Check if the input appears to be a container image (vs volume name)
@@ -161,7 +153,11 @@ impl LibvirtCreateOpts {
     }
 
     /// Find existing volume by container image digest using name-based lookup
-    fn find_cached_volume(&self, image_digest: &str) -> Result<Option<String>> {
+    fn find_cached_volume(
+        &self,
+        global_opts: &crate::libvirt::LibvirtOptions,
+        image_digest: &str,
+    ) -> Result<Option<String>> {
         debug!("Looking for cached volume with digest: {}", image_digest);
 
         // Create a temporary upload opts to get the expected cached volume name
@@ -176,14 +172,13 @@ impl LibvirtCreateOpts {
             },
             vcpus: Some(default_vcpus()),
             karg: vec![],
-            connect: self.connect.clone(),
         };
 
         let expected_volume_name = temp_upload_opts.get_cached_volume_name(image_digest);
         let expected_volume_path = format!("{}.raw", expected_volume_name);
 
         // Check if this specific volume exists
-        let output = self
+        let output = global_opts
             .virsh_command()
             .args(&["vol-info", &expected_volume_path, "--pool", &self.pool])
             .output()?;
@@ -198,7 +193,7 @@ impl LibvirtCreateOpts {
     }
 
     /// Automatically upload container image if no cached volume exists
-    fn ensure_volume_exists(&self) -> Result<String> {
+    fn ensure_volume_exists(&self, global_opts: &crate::libvirt::LibvirtOptions) -> Result<String> {
         if !self.is_container_image() {
             // If it's already a volume name, just return it
             return Ok(self.volume_name_or_image.clone());
@@ -207,7 +202,7 @@ impl LibvirtCreateOpts {
         // It's a container image, check for cached volume
         let image_digest = images::get_image_digest(&self.volume_name_or_image)?;
 
-        if let Some(cached_volume) = self.find_cached_volume(&image_digest)? {
+        if let Some(cached_volume) = self.find_cached_volume(global_opts, &image_digest)? {
             debug!("Using cached volume: {}", cached_volume);
             return Ok(cached_volume);
         }
@@ -227,11 +222,10 @@ impl LibvirtCreateOpts {
             memory: self.install_memory.clone(),
             vcpus: self.install_vcpus,
             karg: self.karg.clone(),
-            connect: self.connect.clone(),
         };
 
         // Run the upload
-        crate::libvirt::upload::run(upload_opts.clone())?;
+        crate::libvirt::upload::run(global_opts, upload_opts.clone())?;
 
         // Return the generated volume name (with digest)
         Ok(upload_opts.get_cached_volume_name(&image_digest))
@@ -243,7 +237,11 @@ impl LibvirtCreateOpts {
     }
 
     /// Check if volume exists in the specified pool
-    fn check_volume_exists(&self, volume_name: &str) -> Result<String> {
+    fn check_volume_exists(
+        &self,
+        global_opts: &crate::libvirt::LibvirtOptions,
+        volume_name: &str,
+    ) -> Result<String> {
         let volume_path = if volume_name.ends_with(".raw") {
             volume_name.to_string()
         } else {
@@ -251,7 +249,7 @@ impl LibvirtCreateOpts {
         };
 
         let output = self
-            .virsh_command()
+            .virsh_command(global_opts)
             .args(&["vol-info", &volume_path, "--pool", &self.pool])
             .output()?;
 
@@ -267,7 +265,7 @@ impl LibvirtCreateOpts {
 
         // Get the full volume path
         let vol_path_output = self
-            .virsh_command()
+            .virsh_command(global_opts)
             .args(&["vol-path", &volume_path, "--pool", &self.pool])
             .output()?;
 
@@ -280,7 +278,11 @@ impl LibvirtCreateOpts {
     }
 
     /// Extract metadata from bootc volume
-    fn get_volume_metadata(&self, volume_name: &str) -> Result<BootcVolumeMetadata> {
+    fn get_volume_metadata(
+        &self,
+        global_opts: &crate::libvirt::LibvirtOptions,
+        volume_name: &str,
+    ) -> Result<BootcVolumeMetadata> {
         let volume_path = if volume_name.ends_with(".raw") {
             volume_name.to_string()
         } else {
@@ -288,7 +290,7 @@ impl LibvirtCreateOpts {
         };
 
         let output = self
-            .virsh_command()
+            .virsh_command(global_opts)
             .args(&["vol-dumpxml", &volume_path, "--pool", &self.pool])
             .output()?;
         if !output.status.success() {
@@ -311,9 +313,13 @@ impl LibvirtCreateOpts {
     }
 
     /// Check if domain already exists
-    fn check_domain_exists(&self, domain_name: &str) -> bool {
+    fn check_domain_exists(
+        &self,
+        global_opts: &crate::libvirt::LibvirtOptions,
+        domain_name: &str,
+    ) -> bool {
         let output = self
-            .virsh_command()
+            .virsh_command(global_opts)
             .args(&["dominfo", domain_name])
             .output();
 
@@ -324,14 +330,19 @@ impl LibvirtCreateOpts {
     }
 
     /// Create a domain-specific copy of the volume
-    fn create_domain_volume(&self, source_volume_name: &str, domain_name: &str) -> Result<String> {
+    fn create_domain_volume(
+        &self,
+        global_opts: &crate::libvirt::LibvirtOptions,
+        source_volume_name: &str,
+        domain_name: &str,
+    ) -> Result<String> {
         let domain_volume_name = format!("{}-{}", source_volume_name, domain_name);
         let domain_volume_path = format!("{}.raw", domain_volume_name);
         let source_volume_path = format!("{}.raw", source_volume_name);
 
         // Check if domain volume already exists
         let check_output = self
-            .virsh_command()
+            .virsh_command(global_opts)
             .args(&["vol-info", &domain_volume_path, "--pool", &self.pool])
             .output()?;
 
@@ -339,7 +350,7 @@ impl LibvirtCreateOpts {
             if self.force {
                 debug!("Removing existing domain volume: {}", domain_volume_name);
                 let _ = self
-                    .virsh_command()
+                    .virsh_command(global_opts)
                     .args(&["vol-delete", &domain_volume_path, "--pool", &self.pool])
                     .output();
             } else {
@@ -357,7 +368,7 @@ impl LibvirtCreateOpts {
 
         // Clone the source volume to create a domain-specific copy
         let output = self
-            .virsh_command()
+            .virsh_command(global_opts)
             .args(&[
                 "vol-clone",
                 &source_volume_path,
@@ -374,7 +385,7 @@ impl LibvirtCreateOpts {
 
         // Get the path to the new domain volume
         let vol_path_output = self
-            .virsh_command()
+            .virsh_command(global_opts)
             .args(&["vol-path", &domain_volume_path, "--pool", &self.pool])
             .output()?;
 
@@ -389,6 +400,7 @@ impl LibvirtCreateOpts {
     /// Create the libvirt domain
     fn create_domain(
         &self,
+        global_opts: &crate::libvirt::LibvirtOptions,
         _volume_path: &str,
         metadata: &BootcVolumeMetadata,
         volume_name: &str,
@@ -397,7 +409,8 @@ impl LibvirtCreateOpts {
         let memory_mb = self.parse_memory()?;
 
         // Create a domain-specific volume copy to avoid file locking issues
-        let domain_volume_path = self.create_domain_volume(volume_name, &domain_name)?;
+        let domain_volume_path =
+            self.create_domain_volume(global_opts, volume_name, &domain_name)?;
         debug!("Using domain-specific volume: {}", domain_volume_path);
 
         // Setup SSH configuration
@@ -408,7 +421,7 @@ impl LibvirtCreateOpts {
             domain_name, volume_name, self.pool
         );
 
-        if self.check_domain_exists(&domain_name) && !self.force {
+        if self.check_domain_exists(global_opts, &domain_name) && !self.force {
             return Err(eyre!(
                 "Domain '{}' already exists. Use --force to recreate.",
                 domain_name
@@ -416,14 +429,14 @@ impl LibvirtCreateOpts {
         }
 
         // If domain exists and force is specified, undefine it first
-        if self.check_domain_exists(&domain_name) && self.force {
+        if self.check_domain_exists(global_opts, &domain_name) && self.force {
             debug!("Domain exists, removing it first (--force specified)");
             let _ = self
-                .virsh_command()
+                .virsh_command(global_opts)
                 .args(&["destroy", &domain_name])
                 .output();
             let _ = self
-                .virsh_command()
+                .virsh_command(global_opts)
                 .args(&["undefine", &domain_name])
                 .output();
         }
@@ -514,7 +527,7 @@ impl LibvirtCreateOpts {
 
         // Define the domain
         let output = self
-            .virsh_command()
+            .virsh_command(global_opts)
             .args(&["define", "/dev/stdin"])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -539,7 +552,7 @@ impl LibvirtCreateOpts {
         if self.start {
             debug!("Starting domain '{}'", domain_name);
             let output = self
-                .virsh_command()
+                .virsh_command(global_opts)
                 .args(&["start", &domain_name])
                 .output()?;
 
@@ -676,27 +689,27 @@ impl LibvirtCreateOpts {
 }
 
 /// Execute the libvirt domain creation process
-pub fn run(opts: LibvirtCreateOpts) -> Result<()> {
+pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtCreateOpts) -> Result<()> {
     debug!(
         "Creating libvirt domain from: {}",
         opts.volume_name_or_image
     );
 
     // Phase 1: Ensure volume exists (auto-upload if needed)
-    let volume_name = opts.ensure_volume_exists()?;
+    let volume_name = opts.ensure_volume_exists(global_opts)?;
 
     // Phase 2: Validate volume exists and get path
-    let volume_path = opts.check_volume_exists(&volume_name)?;
+    let volume_path = opts.check_volume_exists(global_opts, &volume_name)?;
     debug!("Found volume at: {}", volume_path);
 
     // Phase 3: Extract volume metadata
-    let metadata = opts.get_volume_metadata(&volume_name)?;
+    let metadata = opts.get_volume_metadata(global_opts, &volume_name)?;
     if let Some(ref source_image) = metadata.source_image {
         debug!("Volume contains bootc image: {}", source_image);
     }
 
     // Phase 4: Create and optionally start domain
-    opts.create_domain(&volume_path, &metadata, &volume_name)?;
+    opts.create_domain(global_opts, &volume_path, &metadata, &volume_name)?;
 
     Ok(())
 }

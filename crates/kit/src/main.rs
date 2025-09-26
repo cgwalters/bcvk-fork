@@ -112,8 +112,14 @@ enum Commands {
     ToDisk(to_disk::ToDiskOpts),
 
     /// Manage libvirt integration for bootc containers
-    #[clap(subcommand)]
-    Libvirt(libvirt::LibvirtCommands),
+    Libvirt {
+        /// Hypervisor connection URI (e.g., qemu:///system, qemu+ssh://host/system)
+        #[clap(short = 'c', long = "connect", global = true)]
+        connect: Option<String>,
+
+        #[command(subcommand)]
+        command: libvirt::LibvirtSubcommands,
+    },
 
     /// Upload bootc disk images to libvirt (deprecated)
     #[clap(name = "libvirt-upload-disk", hide = true)]
@@ -179,8 +185,25 @@ fn main() -> Result<(), Report> {
         Commands::ToDisk(opts) => {
             to_disk::run(opts)?;
         }
-        Commands::Libvirt(cmd) => {
-            cmd.run()?;
+        Commands::Libvirt { connect, command } => {
+            let options = libvirt::LibvirtOptions { connect };
+            match command {
+                libvirt::LibvirtSubcommands::Run(opts) => libvirt::run::run(&options, opts)?,
+                libvirt::LibvirtSubcommands::Ssh(opts) => libvirt::ssh::run(&options, opts)?,
+                libvirt::LibvirtSubcommands::List(opts) => libvirt::list::run(&options, opts)?,
+                libvirt::LibvirtSubcommands::ListVolumes(opts) => {
+                    libvirt::list_volumes::run(&options, opts)?
+                }
+                libvirt::LibvirtSubcommands::Stop(opts) => libvirt::stop::run(&options, opts)?,
+                libvirt::LibvirtSubcommands::Start(opts) => libvirt::start::run(&options, opts)?,
+                libvirt::LibvirtSubcommands::Remove(opts) => libvirt::rm::run(&options, opts)?,
+                libvirt::LibvirtSubcommands::Inspect(opts) => {
+                    libvirt::inspect::run(&options, opts)?
+                }
+                libvirt::LibvirtSubcommands::Upload(opts) => libvirt::upload::run(&options, opts)?,
+                libvirt::LibvirtSubcommands::Create(opts) => libvirt::create::run(&options, opts)?,
+                libvirt::LibvirtSubcommands::Status(opts) => libvirt::status::run(opts)?,
+            }
         }
         Commands::LibvirtUploadDisk(opts) => {
             eprintln!(

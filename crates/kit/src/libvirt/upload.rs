@@ -46,20 +46,12 @@ pub struct LibvirtUploadOpts {
     /// Additional kernel arguments for installation
     #[clap(long)]
     pub karg: Vec<String>,
-
-    /// Hypervisor connection URI (e.g., qemu:///system, qemu+ssh://host/system)
-    #[clap(short = 'c', long = "connect")]
-    pub connect: Option<String>,
 }
 
 impl LibvirtUploadOpts {
-    /// Build a virsh command with optional connection URI
-    fn virsh_command(&self) -> Command {
-        let mut cmd = Command::new("virsh");
-        if let Some(ref connect) = self.connect {
-            cmd.arg("-c").arg(connect);
-        }
-        cmd
+    /// Build a virsh command with optional connection URI  
+    fn virsh_command(&self, global_opts: &crate::libvirt::LibvirtOptions) -> Command {
+        global_opts.virsh_command()
     }
 
     /// Generate a sanitized volume name from the container image
@@ -110,9 +102,9 @@ impl LibvirtUploadOpts {
     }
 
     /// Check if libvirt storage pool exists
-    fn check_pool_exists(&self) -> Result<()> {
+    fn check_pool_exists(&self, global_opts: &crate::libvirt::LibvirtOptions) -> Result<()> {
         let output = self
-            .virsh_command()
+            .virsh_command(global_opts)
             .args(&["pool-info", &self.pool])
             .output()?;
 
@@ -129,6 +121,7 @@ impl LibvirtUploadOpts {
     /// Upload the disk image to libvirt storage pool
     fn upload_to_libvirt(
         &self,
+        global_opts: &crate::libvirt::LibvirtOptions,
         disk_path: &Path,
         disk_size_bytes: u64,
         image_digest: &str,
@@ -136,20 +129,20 @@ impl LibvirtUploadOpts {
         debug!("Uploading disk to libvirt pool '{}'", self.pool);
 
         // Check pool exists
-        self.check_pool_exists()?;
+        self.check_pool_exists(global_opts)?;
 
         let volume_name = self.get_cached_volume_name(image_digest);
         let volume_path = format!("{}.raw", volume_name);
 
         // Delete existing volume if it exists
         let _ = self
-            .virsh_command()
+            .virsh_command(global_opts)
             .args(&["vol-delete", &volume_path, "--pool", &self.pool])
             .output();
 
         // Use the provided disk size
         let output = self
-            .virsh_command()
+            .virsh_command(global_opts)
             .args(&[
                 "vol-create-as",
                 &self.pool,
@@ -168,7 +161,7 @@ impl LibvirtUploadOpts {
         // Upload the disk image to the volume
         debug!("Uploading disk image to volume '{}'", volume_path);
         let output = self
-            .virsh_command()
+            .virsh_command(global_opts)
             .args(&[
                 "vol-upload",
                 &volume_path,
@@ -188,7 +181,7 @@ impl LibvirtUploadOpts {
 }
 
 /// Execute the libvirt disk upload process
-pub fn run(opts: LibvirtUploadOpts) -> Result<()> {
+pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtUploadOpts) -> Result<()> {
     debug!(
         "Starting libvirt disk upload for image: {}",
         opts.source_image
@@ -238,7 +231,12 @@ pub fn run(opts: LibvirtUploadOpts) -> Result<()> {
 
     to_disk(install_opts)?;
 
-    opts.upload_to_libvirt(temp_disk_path.as_std_path(), disk_size, &image_digest)?;
+    opts.upload_to_libvirt(
+        global_opts,
+        temp_disk_path.as_std_path(),
+        disk_size,
+        &image_digest,
+    )?;
 
     // Keep temp_dir alive until upload completes to prevent cleanup
     drop(temp_dir);

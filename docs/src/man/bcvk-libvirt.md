@@ -19,7 +19,13 @@ libvirt virtualization infrastructure, enabling:
 - Management of VM lifecycle through libvirt
 - Integration with existing libvirt-based infrastructure
 
+# OPTIONS
+
 <!-- BEGIN GENERATED OPTIONS -->
+**-c**, **--connect**=*CONNECT*
+
+    Hypervisor connection URI (e.g., qemu:///system, qemu+ssh://host/system)
+
 <!-- END GENERATED OPTIONS -->
 
 # SUBCOMMANDS

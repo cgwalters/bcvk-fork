@@ -18,17 +18,15 @@ pub struct LibvirtStartOpts {
 }
 
 /// Execute the libvirt start command
-pub fn run(opts: LibvirtStartOpts) -> Result<()> {
-    start_vm_impl(opts)
-}
-
-/// Start a stopped VM (implementation)
-pub fn start_vm_impl(opts: LibvirtStartOpts) -> Result<()> {
+pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtStartOpts) -> Result<()> {
     use crate::domain_list::DomainLister;
     use color_eyre::eyre::Context;
-    use std::process::Command;
 
-    let lister = DomainLister::new();
+    let connect_uri = global_opts.connect.as_ref();
+    let lister = match connect_uri {
+        Some(uri) => DomainLister::with_connection(uri.clone()),
+        None => DomainLister::new(),
+    };
 
     // Check if domain exists and get its state
     let state = lister
@@ -41,13 +39,12 @@ pub fn start_vm_impl(opts: LibvirtStartOpts) -> Result<()> {
             println!("🔗 Connecting to running VM...");
             let ssh_opts = crate::libvirt::ssh::LibvirtSshOpts {
                 domain_name: opts.name,
-                connect: None,
                 user: "root".to_string(),
                 command: vec![],
                 strict_host_keys: false,
                 timeout: 30,
             };
-            return crate::libvirt::ssh::run(ssh_opts);
+            return crate::libvirt::ssh::run(global_opts, ssh_opts);
         }
         return Ok(());
     }
@@ -55,7 +52,8 @@ pub fn start_vm_impl(opts: LibvirtStartOpts) -> Result<()> {
     println!("Starting VM '{}'...", opts.name);
 
     // Use virsh to start the domain
-    let output = Command::new("virsh")
+    let output = global_opts
+        .virsh_command()
         .args(&["start", &opts.name])
         .output()
         .with_context(|| "Failed to run virsh start")?;
@@ -72,8 +70,16 @@ pub fn start_vm_impl(opts: LibvirtStartOpts) -> Result<()> {
     println!("VM '{}' started successfully", opts.name);
 
     if opts.ssh {
-        println!("🔗 Use 'bcvk libvirt ssh {}' to connect", opts.name);
+        // Use the libvirt SSH functionality directly
+        let ssh_opts = crate::libvirt::ssh::LibvirtSshOpts {
+            domain_name: opts.name,
+            user: "root".to_string(),
+            command: vec![],
+            strict_host_keys: false,
+            timeout: 30,
+        };
+        crate::libvirt::ssh::run(global_opts, ssh_opts)
+    } else {
+        Ok(())
     }
-
-    Ok(())
 }

@@ -19,17 +19,16 @@ pub struct LibvirtListOpts {
 }
 
 /// Execute the libvirt list command
-pub fn run(opts: LibvirtListOpts) -> Result<()> {
-    list_vms_impl(opts)
-}
-
-/// List all VMs (implementation)
-pub fn list_vms_impl(opts: LibvirtListOpts) -> Result<()> {
+pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtListOpts) -> Result<()> {
     use crate::domain_list::DomainLister;
     use color_eyre::eyre::Context;
 
     // Use libvirt as the source of truth for domain listing
-    let lister = DomainLister::new();
+    let connect_uri = global_opts.connect.as_ref();
+    let lister = match connect_uri {
+        Some(uri) => DomainLister::with_connection(uri.clone()),
+        None => DomainLister::new(),
+    };
 
     let domains = if opts.all {
         lister
