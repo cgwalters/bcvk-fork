@@ -74,6 +74,7 @@ pub fn run(opts: LibvirtRunOpts) -> Result<()> {
 /// Create and run a bootable container VM (implementation)
 pub fn run_vm_impl(opts: LibvirtRunOpts) -> Result<()> {
     use crate::install_options::InstallOptions;
+    #[cfg(target_os = "linux")]
     use crate::run_ephemeral::CommonVmOpts;
     use crate::to_disk::ToDiskOpts;
 

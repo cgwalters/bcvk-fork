@@ -1,13 +1,18 @@
+#[cfg(target_os = "linux")]
 use camino::{Utf8Path, Utf8PathBuf};
+#[cfg(target_os = "linux")]
 use std::io::{Seek as _, Write as _};
 use std::os::fd::OwnedFd;
 
+#[cfg(target_os = "linux")]
 use cap_std_ext::cap_std::io_lifetimes::AsFilelike as _;
+#[cfg(target_os = "linux")]
 use color_eyre::eyre::{eyre, Context};
 use color_eyre::Result;
 
 /// Creates a sealed memory file descriptor for secure data transfer.
 /// The sealed memfd cannot be modified after creation, providing tamper protection.
+#[cfg(target_os = "linux")]
 #[allow(dead_code)]
 pub(crate) fn impl_sealed_memfd(description: &str, content: &[u8]) -> Result<OwnedFd> {
     use rustix::fs::{MemfdFlags, SealFlags};
@@ -28,7 +33,14 @@ pub(crate) fn impl_sealed_memfd(description: &str, content: &[u8]) -> Result<Own
     Ok(mfd)
 }
 
+#[cfg(not(target_os = "linux"))]
+#[allow(dead_code)]
+pub(crate) fn impl_sealed_memfd(_description: &str, _content: &[u8]) -> Result<OwnedFd> {
+    todo!("memfd not supported on macOS")
+}
+
 /// Detect the container storage path using podman system info
+#[cfg(target_os = "linux")]
 pub(crate) fn detect_container_storage_path() -> Result<Utf8PathBuf> {
     use std::process::Command;
 
@@ -75,6 +87,7 @@ pub(crate) fn detect_container_storage_path() -> Result<Utf8PathBuf> {
 }
 
 /// Validate that a container storage path exists and has the expected structure
+#[cfg(target_os = "linux")]
 pub(crate) fn validate_container_storage_path(path: &Utf8Path) -> Result<()> {
     if !path.exists() {
         return Err(eyre!("Container storage path does not exist: {}", path));
@@ -99,6 +112,7 @@ pub(crate) fn validate_container_storage_path(path: &Utf8Path) -> Result<()> {
 }
 
 /// Parse size string (e.g., "10G", "5120M", "1T") to bytes
+#[cfg(target_os = "linux")]
 pub(crate) fn parse_size(size_str: &str) -> Result<u64> {
     let size_str = size_str.trim().to_uppercase();
 
@@ -130,6 +144,7 @@ pub(crate) fn parse_size(size_str: &str) -> Result<u64> {
 }
 
 /// Parse a memory string (like "2G", "1024M", "512") to megabytes
+#[cfg(target_os = "linux")]
 pub(crate) fn parse_memory_to_mb(memory_str: &str) -> Result<u32> {
     let memory_str = memory_str.trim();
 

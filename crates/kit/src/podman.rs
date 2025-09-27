@@ -1,4 +1,4 @@
-use bootc_utils::CommandRunExt;
+use crate::cmdext::CommandRunExt;
 use color_eyre::{eyre::eyre, Result};
 use serde::Deserialize;
 

@@ -11,12 +11,15 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
-use cap_std_ext::cmdext::CapStdExtCommandExt;
+use crate::cmdfdext::CapStdExtCommandExt;
 use color_eyre::eyre::{eyre, Context};
 use color_eyre::Result;
+#[cfg(target_os = "linux")]
 use libc::{VMADDR_CID_ANY, VMADDR_PORT_ANY};
+#[cfg(target_os = "linux")]
 use nix::sys::socket::{accept, bind, getsockname, socket, AddressFamily, SockFlag, SockType};
 use tracing::{debug, trace, warn};
+#[cfg(target_os = "linux")]
 use vsock::VsockAddr;
 
 /// The device for vsock allocation
@@ -431,6 +434,7 @@ fn spawn(
 
     let mut cmd = Command::new(qemu);
     // SAFETY: This API is safe to call in a forked child.
+    #[cfg(target_os = "linux")]
     unsafe {
         cmd.pre_exec(|| {
             rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::TERM))
@@ -698,6 +702,7 @@ fn spawn(
     cmd.spawn().context("Failed to spawn QEMU")
 }
 
+#[cfg(target_os = "linux")]
 struct VsockCopier {
     port: VsockAddr,
     #[allow(dead_code)]
@@ -707,7 +712,10 @@ struct VsockCopier {
 pub struct RunningQemu {
     pub qemu_process: Child,
     pub virtiofsd_processes: Vec<tokio::process::Child>,
+    #[cfg(target_os = "linux")]
     sd_notification: Option<VsockCopier>,
+    #[cfg(not(target_os = "linux"))]
+    sd_notification: Option<()>,
 }
 
 impl RunningQemu {
@@ -727,6 +735,7 @@ impl RunningQemu {
             None
         };
 
+        #[cfg(target_os = "linux")]
         let sd_notification = if let Some(target) = config.systemd_notify.take() {
             color_eyre::eyre::ensure!(vsockdata.is_some());
             let vsock = socket(
@@ -804,6 +813,8 @@ impl RunningQemu {
         } else {
             None
         };
+        #[cfg(not(target_os = "linux"))]
+        let sd_notification: Option<()> = None;
 
         let creds = sd_notification
             .as_ref()
@@ -974,6 +985,7 @@ pub async fn spawn_virtiofsd_async(config: &VirtiofsConfig) -> Result<tokio::pro
 
     let mut cmd = tokio::process::Command::new(virtiofsd_binary);
     // SAFETY: This API is safe to call in a forked child.
+    #[cfg(target_os = "linux")]
     unsafe {
         cmd.pre_exec(|| {
             rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::TERM))

@@ -9,7 +9,12 @@ use crate::images;
 use crate::install_options::InstallOptions;
 use crate::libvirt::domain::DomainBuilder;
 use crate::libvirt::upload::LibvirtUploadOpts;
+#[cfg(target_os = "linux")]
 use crate::run_ephemeral::default_vcpus;
+#[cfg(not(target_os = "linux"))]
+fn default_vcpus() -> u32 {
+    2
+}
 use crate::ssh::generate_ssh_keypair;
 use crate::sshcred::smbios_cred_for_root_ssh;
 use crate::xml_utils;

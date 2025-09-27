@@ -3,6 +3,7 @@
 //! This module provides cross-architecture support for libvirt domain creation
 //! and QEMU emulator selection, avoiding hardcoded architecture assumptions.
 
+#[cfg(target_os = "linux")]
 use crate::xml_utils::XmlWriter;
 use color_eyre::Result;
 
@@ -12,8 +13,10 @@ pub struct ArchConfig {
     /// Architecture string for libvirt (e.g., "x86_64", "aarch64")
     pub arch: &'static str,
     /// Machine type for libvirt (e.g., "q35", "virt")
+    #[allow(dead_code)]
     pub machine: &'static str,
     /// OS type for libvirt (usually "hvm")
+    #[allow(dead_code)]
     pub os_type: &'static str,
 }
 
@@ -46,6 +49,8 @@ impl ArchConfig {
     }
 
     /// Generate architecture-specific XML features for libvirt
+    #[allow(dead_code)]
+    #[cfg(target_os = "linux")]
     pub fn write_features(&self, writer: &mut XmlWriter) -> Result<()> {
         writer.start_element("features", &[])?;
         writer.write_empty_element("acpi", &[])?;
@@ -61,6 +66,8 @@ impl ArchConfig {
     }
 
     /// Generate architecture-specific timer configuration
+    #[allow(dead_code)]
+    #[cfg(target_os = "linux")]
     pub fn write_timers(&self, writer: &mut XmlWriter) -> Result<()> {
         // RTC timer is common to all architectures
         writer.write_empty_element("timer", &[("name", "rtc"), ("tickpolicy", "catchup")])?;
@@ -81,6 +88,7 @@ impl ArchConfig {
     }
 
     /// Get recommended CPU mode for this architecture
+    #[allow(dead_code)]
     pub fn cpu_mode(&self) -> &'static str {
         match self.arch {
             "x86_64" => "host-passthrough",

@@ -74,13 +74,18 @@
 //! ```
 
 use crate::install_options::InstallOptions;
+#[cfg(target_os = "linux")]
 use crate::run_ephemeral::{run_synchronous as run_ephemeral, CommonVmOpts, RunEphemeralOpts};
+#[cfg(target_os = "linux")]
 use crate::{images, utils};
 use camino::Utf8PathBuf;
 use clap::{Parser, ValueEnum};
+#[cfg(target_os = "linux")]
 use color_eyre::eyre::Context;
 use color_eyre::Result;
+#[cfg(target_os = "linux")]
 use std::borrow::Cow;
+#[cfg(target_os = "linux")]
 use tracing::debug;
 
 /// Supported disk image formats
@@ -133,7 +138,10 @@ pub struct ToDiskOpts {
 
     /// Common VM configuration options
     #[clap(flatten)]
+    #[cfg(target_os = "linux")]
     pub common: CommonVmOpts,
+    #[cfg(not(target_os = "linux"))]
+    pub common: (),
 
     #[clap(
         long = "label",
@@ -146,6 +154,7 @@ impl ToDiskOpts {
     /// Get the container image to use as the installation environment
     ///
     /// Uses the source image itself as the installer environment.
+    #[cfg(target_os = "linux")]
     fn get_installer_image(&self) -> &str {
         &self.source_image
     }
@@ -153,6 +162,7 @@ impl ToDiskOpts {
     /// Resolve and validate the container storage path
     ///
     /// Uses explicit storage_path if specified, otherwise auto-detects container storage.
+    #[cfg(target_os = "linux")]
     fn get_storage_path(&self) -> Result<Utf8PathBuf> {
         if let Some(ref path) = self.install.storage_path {
             utils::validate_container_storage_path(path)?;
@@ -163,6 +173,7 @@ impl ToDiskOpts {
     }
 
     /// Generate the complete bootc installation command
+    #[cfg(target_os = "linux")]
     fn generate_bootc_install_command(&self) -> Vec<String> {
         let source_imgref = format!("containers-storage:{}", self.source_image);
 
@@ -205,6 +216,7 @@ impl ToDiskOpts {
     ///
     /// Returns explicit disk_size if provided (parsed from human-readable format),
     /// otherwise 2x the image size with a 4GB minimum.
+    #[cfg(target_os = "linux")]
     fn calculate_disk_size(&self) -> Result<u64> {
         if let Some(ref size_str) = self.disk_size {
             let parsed = utils::parse_size(size_str)?;
@@ -234,6 +246,7 @@ impl ToDiskOpts {
 ///
 /// Main entry point for the bootc installation process. See module-level documentation
 /// for details on the installation workflow and architecture.
+#[cfg(target_os = "linux")]
 pub fn run(opts: ToDiskOpts) -> Result<()> {
     // Phase 1: Validation and preparation
     // Resolve container storage path (auto-detect or validate specified path)
@@ -303,6 +316,7 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
     let ephemeral_opts = RunEphemeralOpts {
         image: opts.get_installer_image().to_string(),
         common: common_opts,
+        #[cfg(target_os = "linux")]
         podman: crate::run_ephemeral::CommonPodmanOptions {
             rm: true, // Clean up container after installation
             label: opts.label,
@@ -348,6 +362,11 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
             Err(e)
         }
     }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn run(_opts: ToDiskOpts) -> Result<()> {
+    todo!("to-disk not supported on macOS")
 }
 
 // Note: Unit tests should not launch containers, VMs, or perform other system-level operations.

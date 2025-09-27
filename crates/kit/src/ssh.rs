@@ -7,10 +7,12 @@ use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 use tracing::debug;
 
-use crate::CONTAINER_STATEDIR;
+#[allow(dead_code)]
+const CONTAINER_STATEDIR: &str = "/var/lib/bcvk";
 
 /// Represents an SSH keypair with file paths and public key content
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SshKeyPair {
     /// Path to the private key file
     #[allow(dead_code)]
@@ -24,6 +26,7 @@ pub struct SshKeyPair {
 /// Creates a new 4096-bit RSA SSH keypair using the system's `ssh-keygen` command.
 /// The private key is created with secure permissions (0600) and no passphrase to
 /// enable automated use cases.
+#[allow(dead_code)]
 pub fn generate_ssh_keypair(output_dir: &Utf8Path, key_name: &str) -> Result<SshKeyPair> {
     // Create output directory if it doesn't exist
     fs::create_dir_all(output_dir.as_std_path())?;
@@ -68,6 +71,7 @@ pub fn generate_ssh_keypair(output_dir: &Utf8Path, key_name: &str) -> Result<Ssh
     })
 }
 
+#[allow(dead_code)]
 pub fn generate_default_keypair() -> Result<SshKeyPair> {
     generate_ssh_keypair(Utf8Path::new(CONTAINER_STATEDIR), "ssh")
 }
@@ -162,6 +166,7 @@ pub fn generate_default_keypair() -> Result<SshKeyPair> {
 /// - No host networking configuration required  
 /// - Container provides additional isolation layer
 /// - VM network access is controlled by QEMU configuration
+#[allow(dead_code)]
 pub fn connect_via_container(container_name: &str, args: Vec<String>) -> Result<()> {
     let status = connect_via_container_with_status(container_name, args)?;
     if !status.success() {
@@ -175,6 +180,7 @@ pub fn connect_via_container(container_name: &str, args: Vec<String>) -> Result<
 
 /// SSH connection configuration options
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SshConnectionOptions {
     /// Connection timeout in seconds (default: 30)
     pub connect_timeout: u32,
@@ -202,6 +208,7 @@ impl Default for SshConnectionOptions {
 
 impl SshConnectionOptions {
     /// Create options suitable for quick connectivity tests (short timeout, no TTY)
+    #[allow(dead_code)]
     pub fn for_connectivity_test() -> Self {
         Self {
             connect_timeout: 2,
@@ -217,6 +224,7 @@ impl SshConnectionOptions {
 ///
 /// This is the most flexible SSH connection function that allows full control
 /// over SSH options and connection parameters.
+#[allow(dead_code)]
 pub fn connect_via_container_with_options(
     container_name: &str,
     args: Vec<String>,
@@ -299,6 +307,7 @@ pub fn connect_via_container_with_options(
 /// Similar to `connect_via_container` but returns the process exit status
 /// instead of an error when SSH exits with non-zero code. This is useful
 /// for capturing the exit code of remote commands.
+#[allow(dead_code)]
 pub fn connect_via_container_with_status(
     container_name: &str,
     args: Vec<String>,

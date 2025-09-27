@@ -1,40 +1,58 @@
 use std::ffi::OsString;
 
+#[cfg(target_os = "linux")]
 use cap_std_ext::cap_std::fs::Dir;
 use clap::{Parser, Subcommand};
 use color_eyre::{eyre::Context as _, Report, Result};
 
 mod arch;
+#[cfg(target_os = "linux")]
 mod boot_progress;
 mod cli_json;
+mod cmdext;
+mod cmdfdext;
 mod common_opts;
 mod container_entrypoint;
+#[cfg(target_os = "linux")]
 pub(crate) mod containerenv;
+#[cfg(target_os = "linux")]
 mod domain_list;
+#[cfg(target_os = "linux")]
 mod envdetect;
+#[cfg(target_os = "linux")]
+mod ephemeral;
+#[cfg(not(target_os = "linux"))]
+#[path = "ephemeral_stub.rs"]
 mod ephemeral;
 mod hostexec;
 mod images;
 mod install_options;
+#[cfg(target_os = "linux")]
 mod libvirt;
+#[cfg(target_os = "linux")]
 mod libvirt_upload_disk;
 #[allow(dead_code)]
 mod podman;
+#[cfg(target_os = "linux")]
 #[allow(dead_code)]
 mod qemu;
+#[cfg(target_os = "linux")]
 mod run_ephemeral;
+#[cfg(target_os = "linux")]
 mod run_ephemeral_ssh;
 mod ssh;
 #[allow(dead_code)]
 mod sshcred;
+#[cfg(target_os = "linux")]
 mod status_monitor;
+#[cfg(target_os = "linux")]
 mod supervisor_status;
+#[cfg(target_os = "linux")]
 pub(crate) mod systemd;
 mod to_disk;
 mod utils;
+#[cfg(target_os = "linux")]
 mod xml_utils;
-
-pub const CONTAINER_STATEDIR: &str = "/var/lib/bcvk";
 
 /// A comprehensive toolkit for bootc containers and local virtualization.
 ///
@@ -113,9 +131,11 @@ enum Commands {
 
     /// Manage libvirt integration for bootc containers
     #[clap(subcommand)]
+    #[cfg(target_os = "linux")]
     Libvirt(libvirt::LibvirtCommands),
 
     /// Upload bootc disk images to libvirt (deprecated)
+    #[cfg(target_os = "linux")]
     #[clap(name = "libvirt-upload-disk", hide = true)]
     LibvirtUploadDisk(libvirt_upload_disk::LibvirtUploadDiskOpts),
 
@@ -174,14 +194,26 @@ fn main() -> Result<(), Report> {
         Commands::Hostexec(opts) => {
             hostexec::run(opts.bin, opts.args)?;
         }
-        Commands::Images(opts) => opts.run()?,
+        Commands::Images(opts) => {
+            #[cfg(target_os = "linux")]
+            {
+                opts.run()?
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                let _ = opts; // Suppress unused variable warning
+                todo!("Images command not yet supported on macOS")
+            }
+        }
         Commands::Ephemeral(cmd) => cmd.run()?,
         Commands::ToDisk(opts) => {
             to_disk::run(opts)?;
         }
+        #[cfg(target_os = "linux")]
         Commands::Libvirt(cmd) => {
             cmd.run()?;
         }
+        #[cfg(target_os = "linux")]
         Commands::LibvirtUploadDisk(opts) => {
             eprintln!(
                 "Warning: 'libvirt-upload-disk' is deprecated. Use 'libvirt upload' instead."
@@ -194,14 +226,22 @@ fn main() -> Result<(), Report> {
         }
         Commands::DebugInternals(opts) => match opts.command {
             DebugInternalsCmds::OpenTree { path } => {
-                let fd = rustix::mount::open_tree(
-                    rustix::fs::CWD,
-                    path,
-                    rustix::mount::OpenTreeFlags::OPEN_TREE_CLOEXEC
-                        | rustix::mount::OpenTreeFlags::OPEN_TREE_CLONE,
-                )?;
-                let fd = Dir::reopen_dir(&fd)?;
-                tracing::debug!("{:?}", fd.entries()?.into_iter().collect::<Vec<_>>());
+                #[cfg(target_os = "linux")]
+                {
+                    let fd = rustix::mount::open_tree(
+                        rustix::fs::CWD,
+                        path,
+                        rustix::mount::OpenTreeFlags::OPEN_TREE_CLOEXEC
+                            | rustix::mount::OpenTreeFlags::OPEN_TREE_CLONE,
+                    )?;
+                    let fd = Dir::reopen_dir(&fd)?;
+                    tracing::debug!("{:?}", fd.entries()?.into_iter().collect::<Vec<_>>());
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    let _ = path; // Suppress unused variable warning
+                    eprintln!("OpenTree debug command is only available on Linux");
+                }
             }
         },
         Commands::Internals(opts) => match opts.command {

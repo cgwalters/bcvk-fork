@@ -5,6 +5,9 @@
 
 use crate::common_opts::MemoryOpts;
 use crate::install_options::InstallOptions;
+#[cfg(not(target_os = "linux"))]
+use crate::to_disk::ToDiskOpts;
+#[cfg(target_os = "linux")]
 use crate::to_disk::{run as to_disk, ToDiskOpts};
 use crate::{images, utils};
 use camino::Utf8PathBuf;
@@ -223,6 +226,7 @@ pub fn run(opts: LibvirtUploadOpts) -> Result<()> {
         format: crate::to_disk::Format::Raw, // Default to raw format
         disk_size: Some(disk_size.to_string()),
         label: Default::default(),
+        #[cfg(target_os = "linux")]
         common: crate::run_ephemeral::CommonVmOpts {
             memory: opts.memory.clone(),
             vcpus: opts.vcpus,
@@ -234,9 +238,17 @@ pub fn run(opts: LibvirtUploadOpts) -> Result<()> {
             execute: Default::default(),
             ssh_keygen: false,
         },
+        #[cfg(not(target_os = "linux"))]
+        common: (),
     };
 
+    #[cfg(target_os = "linux")]
     to_disk(install_opts)?;
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = install_opts; // Suppress unused variable warning
+        todo!("to_disk not supported on macOS")
+    }
 
     opts.upload_to_libvirt(temp_disk_path.as_std_path(), disk_size, &image_digest)?;
 

@@ -10,17 +10,20 @@ use std::os::unix::ffi::OsStrExt;
 use std::process::Command;
 use std::{collections::HashMap, ffi::OsString};
 
-use bootc_utils::CommandRunExt;
+use crate::cmdext::CommandRunExt;
 use color_eyre::eyre::eyre;
 use color_eyre::Result;
+#[cfg(target_os = "linux")]
 use rand::distr::SampleString;
 
+#[cfg(target_os = "linux")]
 use crate::containerenv::ContainerExecutionInfo;
 
 /// Configuration for systemd-run execution
 #[derive(Debug, Default)]
 pub struct SystemdConfig {
     /// Run detached without output capture (default: false uses --pipe)
+    #[allow(dead_code)]
     detached: bool,
 }
 
@@ -28,6 +31,7 @@ pub struct SystemdConfig {
 ///
 /// Returns None for host system (direct exec), Some(info) for valid container
 /// with --privileged and --pid=host, or error for insufficient privileges.
+#[cfg(target_os = "linux")]
 fn ensure_hostexec_initialized() -> Result<Option<&'static ContainerExecutionInfo>> {
     // Check if we're in a toolbox environment - if so, we're on the host
     if std::env::var("TOOLBOX_PATH").is_ok() {
@@ -52,6 +56,13 @@ fn ensure_hostexec_initialized() -> Result<Option<&'static ContainerExecutionInf
     Ok(Some(info))
 }
 
+#[cfg(not(target_os = "linux"))]
+#[allow(dead_code)]
+fn ensure_hostexec_initialized() -> Result<Option<&'static ()>> {
+    // On macOS, we're always on the host
+    Ok(None)
+}
+
 /// Create Command for host execution
 ///
 /// Returns direct Command for host systems, or systemd-run wrapped Command
@@ -60,41 +71,50 @@ pub fn command(exe: impl AsRef<OsStr>, config: Option<SystemdConfig>) -> Result<
     let exe = exe.as_ref();
     let config = config.unwrap_or_default();
 
-    let Some(info) = ensure_hostexec_initialized()? else {
-        return Ok(Command::new(exe));
-    };
+    #[cfg(target_os = "linux")]
+    {
+        let Some(info) = ensure_hostexec_initialized()? else {
+            return Ok(Command::new(exe));
+        };
 
-    let containerid = &info.id;
-    // A random suffix, 8 alphanumeric chars gives 62 ** 8 possibilities, so low chance of collision
-    // And we only care about such collissions for *concurrent* processes bound to *the same*
-    // podman container ID; after a unit has exited it's fine if we reuse an ID.
-    let runid = rand::distr::Alphanumeric.sample_string(&mut rand::rng(), 8);
-    let unit = format!("hostcmd-{containerid}-{runid}.service");
-    let scope = format!("libpod-{containerid}.scope");
-    let properties = [format!("BindsTo={scope}"), format!("After={scope}")];
+        let containerid = &info.id;
+        // A random suffix, 8 alphanumeric chars gives 62 ** 8 possibilities, so low chance of collision
+        // And we only care about such collissions for *concurrent* processes bound to *the same*
+        // podman container ID; after a unit has exited it's fine if we reuse an ID.
+        let runid = rand::distr::Alphanumeric.sample_string(&mut rand::rng(), 8);
+        let unit = format!("hostcmd-{containerid}-{runid}.service");
+        let scope = format!("libpod-{containerid}.scope");
+        let properties = [format!("BindsTo={scope}"), format!("After={scope}")];
 
-    let properties = properties.into_iter().flat_map(|p| ["-p".to_owned(), p]);
-    let mut r = Command::new("systemd-run");
-    // Note that we need to specify this ExecSearchPath property to suppress heuristics
-    // systemd-run has to search for the binary, which in the general case won't exist
-    // in the container.
-    r.args([
-        "--quiet",
-        "--collect",
-        "-u",
-        unit.as_str(),
-        "--property=ExecSearchPath=/usr/bin",
-    ]);
-    if !config.detached {
-        r.arg("--pipe");
+        let properties = properties.into_iter().flat_map(|p| ["-p".to_owned(), p]);
+        let mut r = Command::new("systemd-run");
+        // Note that we need to specify this ExecSearchPath property to suppress heuristics
+        // systemd-run has to search for the binary, which in the general case won't exist
+        // in the container.
+        r.args([
+            "--quiet",
+            "--collect",
+            "-u",
+            unit.as_str(),
+            "--property=ExecSearchPath=/usr/bin",
+        ]);
+        if !config.detached {
+            r.arg("--pipe");
+        }
+        if info.rootless.is_some() {
+            r.arg("--user");
+        }
+        r.args(properties);
+        r.arg("--");
+        r.arg(exe);
+        Ok(r)
     }
-    if info.rootless.is_some() {
-        r.arg("--user");
+    #[cfg(not(target_os = "linux"))]
+    {
+        // On macOS, we're always on the host, so just return a direct command
+        let _ = config; // Suppress unused variable warning
+        Ok(Command::new(exe))
     }
-    r.args(properties);
-    r.arg("--");
-    r.arg(exe);
-    Ok(r)
 }
 
 /// Execute command on host with error handling

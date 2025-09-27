@@ -35,3 +35,8 @@ needless_borrows_for_generic_args = "allow"
 
 [profile.dev.package.backtrace]
 opt-level = 3
+
+[patch.crates-io]
+# Use cap-std-ext with macOS fixes from PR #80
+# https://github.com/coreos/cap-std-ext/pull/80
+cap-std-ext = { git = "https://github.com/coreos/cap-std-ext", rev = "639f393" }

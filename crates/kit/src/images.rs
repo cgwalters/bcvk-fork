@@ -5,8 +5,9 @@
 
 use std::collections::HashMap;
 
-use bootc_utils::CommandRunExt;
+use crate::cmdext::CommandRunExt;
 use color_eyre::{eyre::eyre, Result};
+#[cfg(target_os = "linux")]
 use comfy_table::{presets::UTF8_FULL, Table};
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +25,7 @@ pub(crate) enum ImagesOpts {
 }
 
 impl ImagesOpts {
+    #[cfg(target_os = "linux")]
     pub(crate) fn run(self) -> Result<()> {
         match self {
             ImagesOpts::List { json } => {
@@ -114,6 +116,7 @@ pub struct ImageInspect {
 }
 
 /// Format bytes into human-readable size string.
+#[cfg(target_os = "linux")]
 fn format_size(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
     let mut size = bytes as f64;
@@ -132,6 +135,7 @@ fn format_size(bytes: u64) -> String {
 }
 
 /// Format a datetime as relative time (e.g., "2 hours ago", "3 days ago").
+#[cfg(target_os = "linux")]
 fn format_relative_time(dt: chrono::DateTime<chrono::Utc>) -> String {
     let now = chrono::Utc::now();
     let duration = now.signed_duration_since(dt);
@@ -216,6 +220,7 @@ pub fn list() -> Result<Vec<ImageListEntry>> {
 }
 
 /// Inspect a container image and return metadata.
+#[cfg(target_os = "linux")]
 pub fn inspect(name: &str) -> Result<ImageInspect> {
     let mut r: Vec<ImageInspect> = hostexec::command("podman", None)?
         .args(["image", "inspect", name])
@@ -225,6 +230,7 @@ pub fn inspect(name: &str) -> Result<ImageInspect> {
 }
 
 /// Get container image size in bytes for disk space planning.
+#[cfg(target_os = "linux")]
 pub fn get_image_size(name: &str) -> Result<u64> {
     tracing::debug!("Getting size for image: {}", name);
     let info = inspect(name)?;
@@ -234,6 +240,7 @@ pub fn get_image_size(name: &str) -> Result<u64> {
 
 /// Get container image digest (sha256) for caching purposes.
 /// Returns the digest in the format "sha256:abc123..."
+#[cfg(target_os = "linux")]
 pub fn get_image_digest(name: &str) -> Result<String> {
     tracing::debug!("Getting digest for image: {}", name);
 

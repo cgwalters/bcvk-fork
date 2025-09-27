@@ -1,9 +1,11 @@
 use clap::{Parser, Subcommand};
 use color_eyre::Result;
 use serde::{Deserialize, Serialize};
+#[cfg(target_os = "linux")]
 use tokio::signal::unix::SignalKind;
 use tracing::debug;
 
+#[cfg(target_os = "linux")]
 use crate::run_ephemeral::RunEphemeralOpts;
 
 #[derive(Parser)]
@@ -47,10 +49,20 @@ pub struct ContainerConfig {
 pub async fn run_ephemeral_in_container() -> Result<()> {
     // Parse BCK_CONFIG from environment
     let config_json = std::env::var("BCK_CONFIG")?;
+    #[cfg(target_os = "linux")]
     let opts: RunEphemeralOpts = serde_json::from_str(&config_json)?;
+    #[cfg(not(target_os = "linux"))]
+    let _opts: serde_json::Value = serde_json::from_str(&config_json)?;
 
     // Call existing run_impl
-    crate::run_ephemeral::run_impl(opts).await
+    #[cfg(target_os = "linux")]
+    {
+        crate::run_ephemeral::run_impl(opts).await
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        todo!("Ephemeral VMs not supported on macOS")
+    }
 }
 
 pub fn ssh_to_vm(opts: SshOpts) -> Result<()> {
@@ -85,35 +97,58 @@ pub fn ssh_to_vm(opts: SshOpts) -> Result<()> {
 }
 
 pub fn monitor_status(_opts: MonitorStatusOpts) -> Result<()> {
-    crate::status_monitor::monitor_and_stream_status()
+    #[cfg(target_os = "linux")]
+    {
+        crate::status_monitor::monitor_and_stream_status()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        todo!("Status monitoring not supported on macOS")
+    }
 }
 
 pub async fn run(opts: ContainerEntrypointOpts) -> Result<()> {
-    let signals = [libc::SIGTERM, libc::SIGINT, libc::SIGRTMIN() + 3];
-    let mut signal_joinset = tokio::task::JoinSet::new();
-    for s in signals {
-        signal_joinset.spawn(async move {
-            let mut signal = tokio::signal::unix::signal(SignalKind::from_raw(s))?;
-            signal.recv().await;
-            Ok::<_, std::io::Error>(())
-        });
-    }
-
-    tokio::select! {
-        _ = signal_joinset.join_next() => {
-            debug!("Caught termination signal");
-            Ok(())
+    #[cfg(target_os = "linux")]
+    {
+        let signals = [libc::SIGTERM, libc::SIGINT, libc::SIGRTMIN() + 3];
+        let mut signal_joinset = tokio::task::JoinSet::new();
+        for s in signals {
+            signal_joinset.spawn(async move {
+                let mut signal = tokio::signal::unix::signal(SignalKind::from_raw(s))?;
+                signal.recv().await;
+                Ok::<_, std::io::Error>(())
+            });
         }
-        r = async {
-            match opts.command {
-                ContainerCommands::RunEphemeral => run_ephemeral_in_container().await,
-                ContainerCommands::Ssh(ssh_opts) => {
-                    tokio::task::spawn_blocking(move || ssh_to_vm(ssh_opts)).await?
-                }
-                ContainerCommands::MonitorStatus(monitor_opts) => {
-                    tokio::task::spawn_blocking(move || monitor_status(monitor_opts)).await?
-                }
+
+        tokio::select! {
+            _ = signal_joinset.join_next() => {
+                debug!("Caught termination signal");
+                Ok(())
             }
-        } => r
+            r = async {
+                match opts.command {
+                    ContainerCommands::RunEphemeral => run_ephemeral_in_container().await,
+                    ContainerCommands::Ssh(ssh_opts) => {
+                        tokio::task::spawn_blocking(move || ssh_to_vm(ssh_opts)).await?
+                    }
+                    ContainerCommands::MonitorStatus(monitor_opts) => {
+                        tokio::task::spawn_blocking(move || monitor_status(monitor_opts)).await?
+                    }
+                }
+            } => r
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        // On non-Linux, run the command directly without signal handling
+        match opts.command {
+            ContainerCommands::RunEphemeral => run_ephemeral_in_container().await,
+            ContainerCommands::Ssh(ssh_opts) => {
+                tokio::task::spawn_blocking(move || ssh_to_vm(ssh_opts)).await?
+            }
+            ContainerCommands::MonitorStatus(monitor_opts) => {
+                tokio::task::spawn_blocking(move || monitor_status(monitor_opts)).await?
+            }
+        }
     }
 }

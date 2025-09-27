@@ -5,7 +5,12 @@
 
 use crate::arch::ArchConfig;
 use crate::common_opts::DEFAULT_MEMORY_USER_STR;
+#[cfg(target_os = "linux")]
 use crate::run_ephemeral::default_vcpus;
+#[cfg(not(target_os = "linux"))]
+fn default_vcpus() -> u32 {
+    2
+}
 use crate::xml_utils::XmlWriter;
 use color_eyre::{eyre::eyre, Result};
 use std::collections::HashMap;

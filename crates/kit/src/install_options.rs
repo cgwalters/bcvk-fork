@@ -32,6 +32,7 @@ pub struct InstallOptions {
 
 impl InstallOptions {
     /// Get the bootc install command arguments for these options
+    #[cfg(target_os = "linux")]
     pub fn to_bootc_args(&self) -> Vec<String> {
         let mut args = vec![];
 

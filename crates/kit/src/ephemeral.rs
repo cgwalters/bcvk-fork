@@ -162,7 +162,7 @@ impl EphemeralCommands {
 
 /// List ephemeral VM containers with bcvk.ephemeral=1 label
 fn list_ephemeral_containers() -> Result<Vec<ContainerListEntry>> {
-    use bootc_utils::CommandRunExt;
+    use crate::cmdext::CommandRunExt;
 
     let containers: Vec<ContainerListEntry> = hostexec::command("podman", None)?
         .args([
@@ -179,7 +179,7 @@ fn list_ephemeral_containers() -> Result<Vec<ContainerListEntry>> {
 
 /// Remove all ephemeral VM containers
 fn remove_all_ephemeral_containers(force: bool) -> Result<()> {
-    use bootc_utils::CommandRunExt;
+    use crate::cmdext::CommandRunExt;
 
     let containers = list_ephemeral_containers()?;
 

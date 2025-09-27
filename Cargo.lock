@@ -159,8 +159,6 @@ name = "bcvk"
 version = "0.2.0"
 dependencies = [
  "base64",
- "bootc-mount",
- "bootc-utils",
  "camino",
  "cap-std-ext",
  "cfg-if",
@@ -215,37 +213,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c8214115b7bf84099f1309324e63141d4c5d7cc26862f97a0a857dbefe165bd"
 
 [[package]]
-name = "bootc-mount"
-version = "0.0.0"
-source = "git+https://github.com/bootc-dev/bootc?rev=93b22f4dbc2d54f7cca7c1df3ee59fcdec0b2cf1#93b22f4dbc2d54f7cca7c1df3ee59fcdec0b2cf1"
-dependencies = [
- "anyhow",
- "bootc-utils",
- "camino",
- "fn-error-context",
- "libc",
- "rustix",
- "serde",
- "tracing",
-]
-
-[[package]]
-name = "bootc-utils"
-version = "0.0.0"
-source = "git+https://github.com/bootc-dev/bootc?rev=93b22f4dbc2d54f7cca7c1df3ee59fcdec0b2cf1#93b22f4dbc2d54f7cca7c1df3ee59fcdec0b2cf1"
-dependencies = [
- "anyhow",
- "rustix",
- "serde",
- "serde_json",
- "shlex",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "bstr"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -273,9 +240,6 @@ name = "camino"
 version = "1.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd0b03af37dad7a14518b7691d81acb0f8222604ad3d1b02f6b4bed5188c0cd5"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "cap-primitives"
@@ -310,8 +274,7 @@ dependencies = [
 [[package]]
 name = "cap-std-ext"
 version = "4.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7770022cf9ca0e804cdc7725fa6be84a3721e5733ba889b3300689dcdb407fa1"
+source = "git+https://github.com/coreos/cap-std-ext?rev=639f393#639f39385ab889ca9a29d3b6638306a1355a54d1"
 dependencies = [
  "cap-primitives",
  "cap-tempfile",

@@ -89,10 +89,11 @@
 
 use std::fs::File;
 use std::io::{BufWriter, Seek, Write};
+#[cfg(target_os = "linux")]
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 
-use bootc_utils::CommandRunExt;
+// use crate::cmdext::CommandRunExt; // Used in local scope
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
 use color_eyre::eyre::{eyre, Context};
@@ -117,7 +118,7 @@ use crate::{
     common_opts::MemoryOpts,
     podman,
     supervisor_status::{StatusWriter, SupervisorState, SupervisorStatus},
-    systemd, utils, CONTAINER_STATEDIR,
+    systemd, utils,
 };
 
 /// Common container lifecycle options for podman commands.
@@ -298,7 +299,15 @@ pub fn run(opts: RunEphemeralOpts) -> Result<()> {
     // Keep _temp_dir alive until exec replaces our process
     // At this point our process is replaced by `podman`, we are just a wrapper for creating
     // a container image and nothing else lives past that event.
-    return Err(cmd.exec()).context("execve");
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt;
+        return Err(cmd.exec()).context("execve");
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        todo!("exec not supported on macOS")
+    }
 }
 
 /// Launch privileged container with QEMU+KVM for ephemeral VM and wait for completion.
@@ -957,7 +966,7 @@ StandardOutput=file:/dev/virtio-ports/executestatus
     let mut main_virtiofsd_config = qemu::VirtiofsConfig::default();
     main_virtiofsd_config.debug = std::env::var("DEBUG_MODE").is_ok();
 
-    std::fs::create_dir_all(CONTAINER_STATEDIR)?;
+    std::fs::create_dir_all(crate::CONTAINER_STATEDIR)?;
 
     // Configure qemu
     let mut qemu_config = crate::qemu::QemuConfig::new_direct_boot(
@@ -1006,10 +1015,11 @@ StandardOutput=file:/dev/virtio-ports/executestatus
         tmpf.seek(std::io::SeekFrom::Start(0))?;
         let path: &Utf8Path = tmpf.path().try_into().unwrap();
 
-        Command::new("mkswap")
-            .args(["-q", path.as_str()])
-            .run()
-            .map_err(|e| eyre!("{e}"))?;
+        {
+            use crate::cmdext::CommandRunExt;
+            Command::new("mkswap").args(["-q", path.as_str()]).run()
+        }
+        .map_err(|e| eyre!("{e}"))?;
 
         qemu_config.add_virtio_blk_device_with_format(
             path.to_owned().into(),
