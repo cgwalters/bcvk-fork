@@ -90,7 +90,7 @@
 use std::fs::File;
 use std::io::{BufWriter, Seek, Write};
 use std::os::unix::process::CommandExt;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use bootc_utils::CommandRunExt;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -708,6 +708,21 @@ pub(crate) async fn run_impl(opts: RunEphemeralOpts) -> Result<()> {
     };
     debug!("Container image systemd version: {systemd_version:?}");
 
+    // Check if we need to handle cloud-init
+    let cloudinit = {
+        Command::new("systemctl")
+            .args([
+                "--root=/run/source-image",
+                "is-enabled",
+                "cloud-init.target",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()?
+            .success()
+    };
+    tracing::debug!("Target image has cloud-init: {cloudinit}");
+
     // Find kernel and initramfs from the container image (not the host)
     let modules_dir = Utf8Path::new("/run/source-image/usr/lib/modules");
     let mut vmlinuz_path = None;
@@ -973,6 +988,12 @@ StandardOutput=file:/dev/virtio-ports/executestatus
 
     if opts.common.console {
         kernel_cmdline.push("console=ttyS0".to_string());
+    }
+    if cloudinit {
+        // We don't provide any cloud-init datasource right now,
+        // though in the future it would make sense to do so,
+        // and switch over our SSH key injection.
+        kernel_cmdline.push("ds=iid-datasource-none".to_string());
     }
 
     kernel_cmdline.extend(opts.common.kernel_args.clone());
