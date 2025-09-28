@@ -215,3 +215,110 @@ pub fn test_to_disk_qcow2() {
         "qcow2 installation successful - disk contains expected partitions, is in qcow2 format, and bootc reported completion"
     );
 }
+
+/// Test disk image caching functionality
+pub fn test_to_disk_caching() {
+    let bck = get_bck_command().unwrap();
+
+    // Create a temporary disk image file
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let disk_path = Utf8PathBuf::try_from(temp_dir.path().join("test-disk-cache.img"))
+        .expect("temp path is not UTF-8");
+
+    println!("Testing disk image caching with: {}", disk_path);
+
+    // First run: Create the disk image
+    println!("=== First run: Creating initial disk image ===");
+    let output1 = Command::new("timeout")
+        .args([
+            "600s", // 10 minute timeout for installation
+            &bck,
+            "to-disk",
+            "--label",
+            INTEGRATION_TEST_LABEL,
+            "quay.io/centos-bootc/centos-bootc:stream10",
+            disk_path.as_str(),
+        ])
+        .output()
+        .expect("Failed to run bcvk to-disk (first time)");
+
+    let stdout1 = String::from_utf8_lossy(&output1.stdout);
+    let stderr1 = String::from_utf8_lossy(&output1.stderr);
+
+    println!("First run output:");
+    println!("stdout:\n{}", stdout1);
+    println!("stderr:\n{}", stderr1);
+
+    // Check that the first run completed successfully
+    assert!(
+        output1.status.success(),
+        "First to-disk run failed with exit code: {:?}. stdout: {}, stderr: {}",
+        output1.status.code(),
+        stdout1,
+        stderr1
+    );
+
+    // Verify the disk was created and has content
+    let metadata1 =
+        std::fs::metadata(&disk_path).expect("Failed to get disk metadata after first run");
+    assert!(metadata1.len() > 0, "Disk image is empty after first run");
+
+    // Verify installation completed successfully
+    assert!(
+        stdout1.contains("Installation complete") || stderr1.contains("Installation complete"),
+        "No 'Installation complete' message found in first run output"
+    );
+
+    // Second run: Should reuse the cached disk
+    println!("=== Second run: Should reuse cached disk image ===");
+    let output2 = Command::new(&bck)
+        .args([
+            "to-disk",
+            "--label",
+            INTEGRATION_TEST_LABEL,
+            "quay.io/centos-bootc/centos-bootc:stream10",
+            disk_path.as_str(),
+        ])
+        .output()
+        .expect("Failed to run bcvk to-disk (second time)");
+
+    let stdout2 = String::from_utf8_lossy(&output2.stdout);
+    let stderr2 = String::from_utf8_lossy(&output2.stderr);
+
+    println!("Second run output:");
+    println!("stdout:\n{}", stdout2);
+    println!("stderr:\n{}", stderr2);
+
+    // Check that the second run completed successfully
+    assert!(
+        output2.status.success(),
+        "Second to-disk run failed with exit code: {:?}. stdout: {}, stderr: {}",
+        output2.status.code(),
+        stdout2,
+        stderr2
+    );
+
+    // Verify cache was used (should see reusing message)
+    assert!(
+        stdout2.contains("Reusing existing cached disk image"),
+        "Second run should have reused cached disk, but cache reuse message not found. stdout: {}, stderr: {}",
+        stdout2, stderr2
+    );
+
+    // Verify the disk metadata didn't change (file wasn't recreated)
+    let metadata2 =
+        std::fs::metadata(&disk_path).expect("Failed to get disk metadata after second run");
+    assert_eq!(
+        metadata1.len(),
+        metadata2.len(),
+        "Disk size changed between runs, indicating it was recreated instead of reused"
+    );
+
+    // Verify the second run was much faster (no installation should have occurred)
+    assert!(
+        !stdout2.contains("Installation complete") && !stderr2.contains("Installation complete"),
+        "Second run should not have performed installation, but found 'Installation complete' message"
+    );
+
+    println!("Disk image caching test successful - cache was properly reused on second run");
+}

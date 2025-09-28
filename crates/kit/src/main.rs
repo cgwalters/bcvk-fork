@@ -6,6 +6,7 @@ use color_eyre::{eyre::Context as _, Report, Result};
 
 mod arch;
 mod boot_progress;
+mod cache_metadata;
 mod cli_json;
 mod common_opts;
 mod container_entrypoint;

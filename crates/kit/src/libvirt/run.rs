@@ -9,6 +9,7 @@ use color_eyre::{eyre::Context, Result};
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
+use tracing::{debug, info};
 
 use crate::common_opts::MemoryOpts;
 use crate::domain_list::DomainLister;
@@ -68,6 +69,8 @@ pub struct LibvirtRunOpts {
 
 /// Execute the libvirt run command
 pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -> Result<()> {
+    use crate::cache_metadata;
+    use crate::images;
     use crate::install_options::InstallOptions;
     use crate::run_ephemeral::CommonVmOpts;
     use crate::to_disk::ToDiskOpts;
@@ -97,41 +100,68 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
         vm_name, opts.image
     );
 
-    // Create disk path in the standard libvirt images directory
-    let disk_path = create_disk_path(&vm_name, &opts.image, connect_uri)
-        .with_context(|| "Failed to create disk path")?;
+    // Get the image digest for caching
+    let inspect = images::inspect(&opts.image)?;
+    let image_digest = inspect.digest.to_string();
+    debug!("Image digest: {}", image_digest);
 
-    // Phase 1: Create bootable disk image using to_disk
-    println!("📀 Creating bootable disk image...");
+    // Try to find a cached disk image
+    let disk_path = find_or_create_cached_disk(
+        &vm_name,
+        &opts.image,
+        &image_digest,
+        &opts.filesystem,
+        None, // root_size
+        &[],  // kernel_args
+        connect_uri,
+    )
+    .with_context(|| "Failed to find or create disk path")?;
 
-    let to_disk_opts = ToDiskOpts {
-        source_image: opts.image.clone(),
-        target_disk: disk_path.clone(),
-        disk_size: Some(opts.disk_size.clone()),
-        format: crate::to_disk::Format::Raw, // Default to raw format
-        install: InstallOptions {
-            filesystem: Some(opts.filesystem.clone()),
-            root_size: None,
-            storage_path: None,
-        },
-        common: CommonVmOpts {
-            memory: opts.memory.clone(),
-            vcpus: Some(opts.cpus),
-            kernel_args: vec![],
-            net: None,
-            console: false,
-            debug: false,
-            virtio_serial_out: vec![],
-            execute: vec![],
-            ssh_keygen: true, // Enable SSH key generation
-        },
-        label: vec![],
-    };
+    // Check if we can reuse an existing disk image
+    let cached = cache_metadata::check_cached_disk(
+        disk_path.as_std_path(),
+        &image_digest,
+        Some(&opts.filesystem),
+        None, // root_size
+        &[],  // kernel_args
+    )?;
 
-    // Run the disk creation
-    crate::to_disk::run(to_disk_opts).with_context(|| "Failed to create bootable disk image")?;
+    if cached {
+        println!("🎯 Reusing cached disk image at: {}", disk_path);
+    } else {
+        // Phase 1: Create bootable disk image using to_disk
+        println!("📀 Creating bootable disk image...");
 
-    println!("Disk image created at: {}", disk_path);
+        let to_disk_opts = ToDiskOpts {
+            source_image: opts.image.clone(),
+            target_disk: disk_path.clone(),
+            disk_size: Some(opts.disk_size.clone()),
+            format: crate::to_disk::Format::Raw, // Default to raw format
+            install: InstallOptions {
+                filesystem: Some(opts.filesystem.clone()),
+                root_size: None,
+                storage_path: None,
+            },
+            common: CommonVmOpts {
+                memory: opts.memory.clone(),
+                vcpus: Some(opts.cpus),
+                kernel_args: vec![],
+                net: None,
+                console: false,
+                debug: false,
+                virtio_serial_out: vec![],
+                execute: vec![],
+                ssh_keygen: true, // Enable SSH key generation
+            },
+            label: vec![],
+        };
+
+        // Run the disk creation
+        crate::to_disk::run(to_disk_opts)
+            .with_context(|| "Failed to create bootable disk image")?;
+
+        println!("Disk image created at: {}", disk_path);
+    }
 
     // Phase 2: Create libvirt domain
     println!("Creating libvirt domain...");
@@ -271,6 +301,77 @@ fn generate_unique_vm_name(image: &str, existing_domains: &[String]) -> String {
     candidate
 }
 
+/// Find a cached disk or create a new disk path for a VM
+fn find_or_create_cached_disk(
+    vm_name: &str,
+    source_image: &str,
+    image_digest: &str,
+    filesystem: &str,
+    root_size: Option<&str>,
+    kernel_args: &[String],
+    connect_uri: Option<&String>,
+) -> Result<Utf8PathBuf> {
+    use crate::cache_metadata;
+
+    // Query libvirt for the default storage pool path
+    let base_dir = get_libvirt_storage_pool_path(connect_uri).unwrap_or_else(|_| {
+        // Fallback to standard paths if we can't query libvirt
+        if let Ok(home) = std::env::var("HOME") {
+            Utf8PathBuf::from(home).join(".local/share/libvirt/images")
+        } else {
+            Utf8PathBuf::from("/var/lib/libvirt/images")
+        }
+    });
+
+    // Ensure the directory exists
+    fs::create_dir_all(base_dir.as_std_path())
+        .with_context(|| format!("Failed to create directory: {:?}", base_dir))?;
+
+    // First, try to find an existing disk with matching metadata
+    debug!("Searching for cached disk images in {:?}", base_dir);
+
+    // Look for existing disk images with the same image hash pattern
+    let mut hasher = DefaultHasher::new();
+    source_image.hash(&mut hasher);
+    let image_hash = hasher.finish();
+    let hash_prefix = format!("{:x}", image_hash)
+        .chars()
+        .take(8)
+        .collect::<String>();
+
+    // Check existing files with matching pattern
+    if let Ok(entries) = fs::read_dir(&base_dir) {
+        for entry in entries.flatten() {
+            if let Ok(file_name) = entry.file_name().into_string() {
+                // Check if this file matches our naming pattern
+                if file_name.starts_with(&format!("{}-{}", vm_name, hash_prefix))
+                    && file_name.ends_with(".raw")
+                {
+                    let path = base_dir.join(&file_name);
+                    debug!("Checking potential cached disk: {:?}", path);
+
+                    // Check if this disk has matching metadata
+                    if cache_metadata::check_cached_disk(
+                        path.as_std_path(),
+                        image_digest,
+                        Some(filesystem),
+                        root_size,
+                        kernel_args,
+                    )? {
+                        info!("Found matching cached disk image: {:?}", path);
+                        return Ok(path);
+                    }
+                }
+            }
+        }
+    }
+
+    debug!("No matching cached disk found, will create new one");
+
+    // If no cached disk found, create a new path
+    create_disk_path(vm_name, source_image, connect_uri)
+}
+
 /// Create disk path for a VM using image hash as suffix
 fn create_disk_path(
     vm_name: &str,
@@ -386,7 +487,6 @@ fn create_libvirt_domain_from_disk(
     use crate::libvirt::domain::DomainBuilder;
     use crate::ssh::generate_ssh_keypair;
     use crate::sshcred::smbios_cred_for_root_ssh;
-    use tracing::debug;
 
     // Generate SSH keypair for the domain
     debug!(
@@ -428,6 +528,13 @@ fn create_libvirt_domain_from_disk(
 
     let memory = parse_memory_to_mb(&opts.memory.memory)?;
 
+    // Get container image digest from disk for XML metadata visibility
+    let container_image_digest =
+        crate::cache_metadata::DiskImageMetadata::read_image_digest_from_path(
+            disk_path.as_std_path(),
+        )
+        .unwrap_or(None);
+
     // Build domain XML using the existing DomainBuilder with bootc metadata and SSH keys
     let mut domain_builder = DomainBuilder::new()
         .with_name(domain_name)
@@ -444,6 +551,11 @@ fn create_libvirt_domain_from_disk(
         .with_metadata("bootc:ssh-generated", "true")
         .with_metadata("bootc:ssh-private-key-base64", &private_key_base64)
         .with_metadata("bootc:ssh-port", &ssh_port.to_string());
+
+    // Add container image digest to XML for visibility if available
+    if let Some(digest) = &container_image_digest {
+        domain_builder = domain_builder.with_metadata("bootc:image-digest", digest);
+    }
 
     // Add container storage mount if requested
     if opts.bind_storage_ro {

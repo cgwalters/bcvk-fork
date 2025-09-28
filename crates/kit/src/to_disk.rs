@@ -75,6 +75,7 @@
 
 use std::io::IsTerminal;
 
+use crate::cache_metadata::DiskImageMetadata;
 use crate::install_options::InstallOptions;
 use crate::run_ephemeral::{run_detached, CommonVmOpts, RunEphemeralOpts};
 use crate::run_ephemeral_ssh::wait_for_ssh_ready;
@@ -246,6 +247,40 @@ impl ToDiskOpts {
 /// Main entry point for the bootc installation process. See module-level documentation
 /// for details on the installation workflow and architecture.
 pub fn run(opts: ToDiskOpts) -> Result<()> {
+    // Phase 0: Check for existing cached disk image
+    if opts.target_disk.exists() {
+        debug!(
+            "Target disk {} already exists, checking cache metadata",
+            opts.target_disk
+        );
+
+        // Get the image digest for comparison
+        let inspect = images::inspect(&opts.source_image)?;
+        let image_digest = inspect.digest.to_string();
+
+        // Check if cached disk matches our requirements
+        let matches = crate::cache_metadata::check_cached_disk(
+            opts.target_disk.as_std_path(),
+            &image_digest,
+            opts.install.filesystem.as_deref(),
+            opts.install.root_size.as_deref(),
+            &opts.common.kernel_args,
+        )?;
+
+        if matches {
+            println!(
+                "Reusing existing cached disk image (digest {image_digest}) at: {}",
+                opts.target_disk
+            );
+            return Ok(());
+        } else {
+            debug!("Existing disk does not match requirements, recreating");
+            // Remove the existing disk so we can recreate it
+            std::fs::remove_file(&opts.target_disk)
+                .with_context(|| format!("Failed to remove existing disk {}", opts.target_disk))?;
+        }
+    }
+
     // Phase 1: Validation and preparation
     // Resolve container storage path (auto-detect or validate specified path)
     let storage_path = opts.get_storage_path()?;
@@ -376,12 +411,67 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
 
     // Handle the result - remove disk file on failure
     match result {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            // Write metadata to the disk image for caching
+            // Extract values before they're potentially moved
+            let write_result = write_disk_metadata(
+                &opts.source_image,
+                &opts.target_disk,
+                opts.install.filesystem.as_deref(),
+                opts.install.root_size.as_deref(),
+                &opts.common.kernel_args,
+                &opts.format,
+            );
+            if let Err(e) = write_result {
+                debug!("Failed to write metadata to disk image: {}", e);
+                // Don't fail the operation just because metadata couldn't be written
+            }
+            Ok(())
+        }
         Err(e) => {
             let _ = std::fs::remove_file(&opts.target_disk);
             Err(e)
         }
     }
+}
+
+/// Write metadata to disk image for caching purposes
+fn write_disk_metadata(
+    source_image: &str,
+    target_disk: &Utf8PathBuf,
+    filesystem: Option<&str>,
+    root_size: Option<&str>,
+    kernel_args: &[String],
+    format: &Format,
+) -> Result<()> {
+    // Note: xattrs work on regular files including raw and qcow2 images
+    // as they're stored in the filesystem metadata, not inside the disk image
+
+    // Get the image digest
+    let inspect = images::inspect(source_image)?;
+    let digest = inspect.digest.to_string();
+
+    // Prepare metadata
+    let mut metadata = DiskImageMetadata::new(&digest);
+    metadata.filesystem = filesystem.map(|s| s.to_owned());
+    metadata.root_size = root_size.map(|s| s.to_string());
+    metadata.kernel_args = kernel_args.to_vec();
+
+    // Write metadata using rustix fsetxattr
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(target_disk)
+        .with_context(|| format!("Failed to open disk file {}", target_disk))?;
+
+    metadata
+        .write_to_file(&file)
+        .with_context(|| "Failed to write metadata to disk file")?;
+
+    debug!(
+        "Successfully wrote cache metadata to disk image for format {:?}",
+        format
+    );
+    Ok(())
 }
 
 // Note: Unit tests should not launch containers, VMs, or perform other system-level operations.

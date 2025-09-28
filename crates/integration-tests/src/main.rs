@@ -172,6 +172,10 @@ fn main() {
             tests::to_disk::test_to_disk_qcow2();
             Ok(())
         }),
+        Trial::test("to_disk_caching", || {
+            tests::to_disk::test_to_disk_caching();
+            Ok(())
+        }),
         Trial::test("libvirt_list_functionality", || {
             tests::libvirt_verb::test_libvirt_list_functionality();
             Ok(())
