@@ -6,7 +6,8 @@ publish = false
 
 [dependencies]
 base64 = "0.22"
-cap-std-ext = { version = "4" }
+# For some recent APIs, TODO switch back to published version
+cap-std-ext = { git = "https://github.com/coreos/cap-std-ext", rev = "cfdb25d51ffc697e70aa0d8d3cefe9ec2133bd0a" }
 chrono = { version = "0.4", features = ["serde"] }
 const_format = { workspace = true }
 color-eyre = { workspace = true }
@@ -47,6 +48,7 @@ comfy-table = "7.1"
 strum = { version = "0.26", features = ["derive"] }
 quick-xml = "0.36"
 oci-spec = "0.8.2"
+sha2 = "0.10"
 
 [dev-dependencies]
 similar-asserts = "1.5"
