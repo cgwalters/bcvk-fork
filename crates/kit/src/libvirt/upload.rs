@@ -188,7 +188,8 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtUploadOpts
     );
 
     // Phase 1: Extract image digest for caching
-    let image_digest = images::get_image_digest(&opts.source_image)?;
+    let inspect = images::inspect(&opts.source_image)?;
+    let image_digest = &inspect.digest.to_string();
     debug!("Container image digest: {}", image_digest);
 
     // Phase 2: Calculate disk size to use
