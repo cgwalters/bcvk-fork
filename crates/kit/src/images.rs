@@ -106,6 +106,9 @@ pub struct ImageInspect {
     /// SHA256 image identifier
     pub id: String,
 
+    /// Image digest
+    pub digest: oci_spec::image::Digest,
+
     /// Image size in bytes
     pub size: u64,
 
@@ -230,35 +233,6 @@ pub fn get_image_size(name: &str) -> Result<u64> {
     let info = inspect(name)?;
     tracing::debug!("Found image size: {} bytes", info.size);
     Ok(info.size)
-}
-
-/// Get container image digest (sha256) for caching purposes.
-/// Returns the digest in the format "sha256:abc123..."
-pub fn get_image_digest(name: &str) -> Result<String> {
-    tracing::debug!("Getting digest for image: {}", name);
-
-    // Use skopeo inspect to get the manifest digest, which is more reliable than podman
-    // for getting the actual @sha256 digest that can be used for caching
-    let output = hostexec::command("skopeo", None)?
-        .args(["inspect", &format!("containers-storage:{}", name)])
-        .run_and_parse_json::<serde_json::Value>()
-        .map_err(|e| eyre!("Failed to inspect image with skopeo: {}", e))?;
-
-    // Extract the digest from the skopeo output
-    if let Some(digest) = output.get("Digest").and_then(|d| d.as_str()) {
-        tracing::debug!("Found image digest: {}", digest);
-        Ok(digest.to_string())
-    } else {
-        // Fall back to podman image inspect
-        tracing::debug!("No digest in skopeo output, falling back to podman inspect");
-        let info = inspect(name)?;
-        // Podman ID is already in sha256:xxx format
-        if info.id.starts_with("sha256:") {
-            Ok(info.id)
-        } else {
-            Ok(format!("sha256:{}", info.id))
-        }
-    }
 }
 
 #[cfg(test)]

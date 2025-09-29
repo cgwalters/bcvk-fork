@@ -200,7 +200,8 @@ impl LibvirtCreateOpts {
         }
 
         // It's a container image, check for cached volume
-        let image_digest = images::get_image_digest(&self.volume_name_or_image)?;
+        let image = images::inspect(&self.volume_name_or_image)?;
+        let image_digest = image.digest.to_string();
 
         if let Some(cached_volume) = self.find_cached_volume(global_opts, &image_digest)? {
             debug!("Using cached volume: {}", cached_volume);
