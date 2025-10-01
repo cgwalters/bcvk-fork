@@ -75,8 +75,9 @@ impl Environment {
     /// Designed to handle partial failures gracefully.
     fn new() -> Result<Self> {
         let rootfs = &global_rootfs(cap_std::ambient_authority())?;
-        let privileged =
-            rustix::thread::capability_is_in_bounding_set(rustix::thread::Capability::SystemAdmin)?;
+        let privileged = rustix::thread::capability_is_in_bounding_set(
+            rustix::thread::CapabilitySet::SYS_ADMIN,
+        )?;
         let container = super::containerenv::is_container(&rootfs)?;
         let containerenv = super::containerenv::get_container_execution_info(&rootfs)?;
         let pidhost = is_hostpid()?;
