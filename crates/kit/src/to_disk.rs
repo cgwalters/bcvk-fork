@@ -490,8 +490,7 @@ mod tests {
             label: Default::default(),
             install: InstallOptions {
                 filesystem: Some("ext4".to_string()),
-                root_size: None,
-                storage_path: None,
+                ..Default::default()
             },
             disk_size: Some("10G".to_string()),
             format: Format::Raw,
@@ -509,8 +508,7 @@ mod tests {
             label: Default::default(),
             install: InstallOptions {
                 filesystem: Some("ext4".to_string()),
-                root_size: None,
-                storage_path: None,
+                ..Default::default()
             },
             disk_size: Some("5120M".to_string()),
             format: Format::Raw,

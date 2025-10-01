@@ -45,6 +45,10 @@ Upload bootc disk images to libvirt with metadata annotations
 
     Path to host container storage (auto-detected if not specified)
 
+**--composefs-native**
+
+    Default to composefs-native storage
+
 **--memory**=*MEMORY*
 
     Memory size (e.g. 4G, 2048M, or plain number for MB)
