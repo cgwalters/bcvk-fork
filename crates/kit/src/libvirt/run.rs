@@ -13,6 +13,7 @@ use tracing::{debug, info};
 
 use crate::common_opts::MemoryOpts;
 use crate::domain_list::DomainLister;
+use crate::install_options::InstallOptions;
 use crate::libvirt::domain::VirtiofsFilesystem;
 use crate::utils::parse_memory_to_mb;
 use crate::xml_utils;
@@ -38,9 +39,9 @@ pub struct LibvirtRunOpts {
     #[clap(long, default_value = "20G")]
     pub disk_size: String,
 
-    /// Root filesystem type for installation
-    #[clap(long, default_value = "ext4")]
-    pub filesystem: String,
+    /// Installation options (filesystem, root-size, etc.)
+    #[clap(flatten)]
+    pub install: InstallOptions,
 
     /// Port mapping from host to VM
     #[clap(long = "port", short = 'p', action = clap::ArgAction::Append)]
@@ -71,7 +72,6 @@ pub struct LibvirtRunOpts {
 pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -> Result<()> {
     use crate::cache_metadata;
     use crate::images;
-    use crate::install_options::InstallOptions;
     use crate::run_ephemeral::CommonVmOpts;
     use crate::to_disk::ToDiskOpts;
 
@@ -110,9 +110,8 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
         &vm_name,
         &opts.image,
         &image_digest,
-        &opts.filesystem,
-        None, // root_size
-        &[],  // kernel_args
+        &opts.install,
+        &[], // kernel_args
         connect_uri,
     )
     .with_context(|| "Failed to find or create disk path")?;
@@ -121,9 +120,8 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
     let cached = cache_metadata::check_cached_disk(
         disk_path.as_std_path(),
         &image_digest,
-        Some(&opts.filesystem),
-        None, // root_size
-        &[],  // kernel_args
+        &opts.install,
+        &[], // kernel_args
     )?;
 
     if cached {
@@ -137,10 +135,7 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
             target_disk: disk_path.clone(),
             disk_size: Some(opts.disk_size.clone()),
             format: crate::to_disk::Format::Raw, // Default to raw format
-            install: InstallOptions {
-                filesystem: Some(opts.filesystem.clone()),
-                ..Default::default()
-            },
+            install: opts.install.clone(),
             common: CommonVmOpts {
                 memory: opts.memory.clone(),
                 vcpus: Some(opts.cpus),
@@ -305,8 +300,7 @@ fn find_or_create_cached_disk(
     vm_name: &str,
     source_image: &str,
     image_digest: &str,
-    filesystem: &str,
-    root_size: Option<&str>,
+    install_options: &InstallOptions,
     kernel_args: &[String],
     connect_uri: Option<&String>,
 ) -> Result<Utf8PathBuf> {
@@ -353,8 +347,7 @@ fn find_or_create_cached_disk(
                     if cache_metadata::check_cached_disk(
                         path.as_std_path(),
                         image_digest,
-                        Some(filesystem),
-                        root_size,
+                        install_options,
                         kernel_args,
                     )? {
                         info!("Found matching cached disk image: {:?}", path);
@@ -545,7 +538,13 @@ fn create_libvirt_domain_from_disk(
         .with_metadata("bootc:memory-mb", &opts.memory.to_string())
         .with_metadata("bootc:vcpus", &opts.cpus.to_string())
         .with_metadata("bootc:disk-size-gb", &opts.disk_size.to_string())
-        .with_metadata("bootc:filesystem", &opts.filesystem)
+        .with_metadata(
+            "bootc:filesystem",
+            opts.install
+                .filesystem
+                .as_ref()
+                .unwrap_or(&"ext4".to_string()),
+        )
         .with_metadata("bootc:network", &opts.network)
         .with_metadata("bootc:ssh-generated", "true")
         .with_metadata("bootc:ssh-private-key-base64", &private_key_base64)

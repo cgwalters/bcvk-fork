@@ -8,6 +8,7 @@
 //! - A SHA256 hash of all build inputs for cache validation
 //! - The container image digest for visibility and tracking
 
+use crate::install_options::InstallOptions;
 use cap_std_ext::cap_std::{self, fs::Dir};
 use cap_std_ext::dirext::CapStdExtDirExt;
 use color_eyre::{eyre::Context, Result};
@@ -35,6 +36,9 @@ struct CacheInputs {
     /// Root filesystem size if specified
     root_size: Option<String>,
 
+    /// Whether to use composefs-native storage
+    composefs_native: bool,
+
     /// Kernel arguments used during installation
     kernel_args: Vec<String>,
 
@@ -54,6 +58,9 @@ pub struct DiskImageMetadata {
     /// Root filesystem size if specified
     pub root_size: Option<String>,
 
+    /// Whether to use composefs-native storage
+    pub composefs_native: bool,
+
     /// Kernel arguments used during installation
     pub kernel_args: Vec<String>,
 
@@ -62,23 +69,13 @@ pub struct DiskImageMetadata {
 }
 
 impl DiskImageMetadata {
-    /// Create new metadata for a disk image
-    pub fn new(digest: &str) -> Self {
-        Self {
-            version: 1,
-            digest: digest.to_owned(),
-            filesystem: None,
-            root_size: None,
-            kernel_args: Default::default(),
-        }
-    }
-
     /// Generate SHA256 hash of all build inputs
     fn compute_cache_hash(&self) -> String {
         let inputs = CacheInputs {
             image_digest: self.digest.clone(),
             filesystem: self.filesystem.clone(),
             root_size: self.root_size.clone(),
+            composefs_native: self.composefs_native,
             kernel_args: self.kernel_args.clone(),
             version: self.version,
         };
@@ -154,12 +151,25 @@ impl DiskImageMetadata {
     }
 }
 
+impl DiskImageMetadata {
+    /// Create new metadata from InstallOptions and image digest
+    pub fn from(options: &InstallOptions, image: &str, kernel_args: &[String]) -> Self {
+        Self {
+            version: 1,
+            digest: image.to_owned(),
+            filesystem: options.filesystem.clone(),
+            root_size: options.root_size.clone(),
+            kernel_args: kernel_args.to_vec(),
+            composefs_native: options.composefs_native,
+        }
+    }
+}
+
 /// Check if a cached disk image can be reused by comparing cache hashes
 pub fn check_cached_disk(
     path: &Path,
     image_digest: &str,
-    filesystem: Option<&str>,
-    root_size: Option<&str>,
+    install_options: &InstallOptions,
     kernel_args: &[String],
 ) -> Result<bool> {
     if !path.exists() {
@@ -168,10 +178,7 @@ pub fn check_cached_disk(
     }
 
     // Create metadata for the current request to compute expected hash
-    let mut expected_meta = DiskImageMetadata::new(image_digest);
-    expected_meta.filesystem = filesystem.map(ToOwned::to_owned);
-    expected_meta.root_size = root_size.map(ToOwned::to_owned);
-    expected_meta.kernel_args = Vec::from(kernel_args);
+    let expected_meta = DiskImageMetadata::from(install_options, image_digest, kernel_args);
     let expected_hash = expected_meta.compute_cache_hash();
 
     // Read the cache hash from the disk image
@@ -221,15 +228,29 @@ mod tests {
 
     #[test]
     fn test_cache_hash_generation() {
-        let mut metadata1 = DiskImageMetadata::new("sha256:abc123");
-        metadata1.filesystem = Some("ext4".to_string());
-        metadata1.root_size = Some("20G".to_string());
-        metadata1.kernel_args = vec!["console=ttyS0".to_string()];
+        let install_options1 = InstallOptions {
+            filesystem: Some("ext4".to_string()),
+            root_size: Some("20G".to_string()),
+            storage_path: None,
+            composefs_native: false,
+        };
+        let metadata1 = DiskImageMetadata::from(
+            &install_options1,
+            "sha256:abc123",
+            &["console=ttyS0".to_string()],
+        );
 
-        let mut metadata2 = DiskImageMetadata::new("sha256:abc123");
-        metadata2.filesystem = Some("ext4".to_string());
-        metadata2.root_size = Some("20G".to_string());
-        metadata2.kernel_args = vec!["console=ttyS0".to_string()];
+        let install_options2 = InstallOptions {
+            filesystem: Some("ext4".to_string()),
+            root_size: Some("20G".to_string()),
+            storage_path: None,
+            composefs_native: false,
+        };
+        let metadata2 = DiskImageMetadata::from(
+            &install_options2,
+            "sha256:abc123",
+            &["console=ttyS0".to_string()],
+        );
 
         // Same inputs should generate same hash
         assert_eq!(
@@ -238,10 +259,17 @@ mod tests {
         );
 
         // Different inputs should generate different hashes
-        let mut metadata3 = DiskImageMetadata::new("sha256:xyz789");
-        metadata3.filesystem = Some("ext4".to_string());
-        metadata3.root_size = Some("20G".to_string());
-        metadata3.kernel_args = vec!["console=ttyS0".to_string()];
+        let install_options3 = InstallOptions {
+            filesystem: Some("ext4".to_string()),
+            root_size: Some("20G".to_string()),
+            storage_path: None,
+            composefs_native: false,
+        };
+        let metadata3 = DiskImageMetadata::from(
+            &install_options3,
+            "sha256:xyz789",
+            &["console=ttyS0".to_string()],
+        );
 
         assert_ne!(
             metadata1.compute_cache_hash(),
@@ -249,10 +277,17 @@ mod tests {
         );
 
         // Different filesystem should generate different hash
-        let mut metadata4 = DiskImageMetadata::new("sha256:abc123");
-        metadata4.filesystem = Some("xfs".to_string());
-        metadata4.root_size = Some("20G".to_string());
-        metadata4.kernel_args = vec!["console=ttyS0".to_string()];
+        let install_options4 = InstallOptions {
+            filesystem: Some("xfs".to_string()),
+            root_size: Some("20G".to_string()),
+            storage_path: None,
+            composefs_native: false,
+        };
+        let metadata4 = DiskImageMetadata::from(
+            &install_options4,
+            "sha256:abc123",
+            &["console=ttyS0".to_string()],
+        );
 
         assert_ne!(
             metadata1.compute_cache_hash(),
@@ -267,6 +302,7 @@ mod tests {
             filesystem: Some("ext4".to_string()),
             root_size: Some("20G".to_string()),
             kernel_args: vec!["console=ttyS0".to_string()],
+            composefs_native: false,
             version: 1,
         };
 
