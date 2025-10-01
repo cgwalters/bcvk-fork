@@ -81,6 +81,10 @@ Create and start domains from uploaded bootc volumes
 
     Path to host container storage (auto-detected if not specified)
 
+**--composefs-native**
+
+    Default to composefs-native storage
+
 **--disk-size**=*DISK_SIZE*
 
     Size of the disk image for automatic upload (e.g., '20G', '10240M')

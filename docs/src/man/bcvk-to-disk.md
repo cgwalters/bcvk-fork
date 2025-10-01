@@ -47,6 +47,10 @@ The installation process:
 
     Path to host container storage (auto-detected if not specified)
 
+**--composefs-native**
+
+    Default to composefs-native storage
+
 **--disk-size**=*DISK_SIZE*
 
     Disk size to create (e.g. 10G, 5120M, or plain number for bytes)

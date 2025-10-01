@@ -12,7 +12,7 @@ use clap::Parser;
 /// These options control filesystem configuration and storage paths
 /// for bootc installation commands. Use `#[clap(flatten)]` to include
 /// these in command-specific option structures.
-#[derive(Debug, Parser, Clone)]
+#[derive(Debug, Default, Parser, Clone)]
 pub struct InstallOptions {
     /// Root filesystem type (overrides bootc image default)
     #[clap(long, help = "Root filesystem type (e.g. ext4, xfs, btrfs)")]
@@ -28,6 +28,10 @@ pub struct InstallOptions {
         help = "Path to host container storage (auto-detected if not specified)"
     )]
     pub storage_path: Option<Utf8PathBuf>,
+
+    /// Default to composefs-native storage
+    #[clap(long)]
+    pub composefs_native: bool,
 }
 
 impl InstallOptions {
@@ -43,6 +47,10 @@ impl InstallOptions {
         if let Some(ref root_size) = self.root_size {
             args.push("--root-size".to_string());
             args.push(root_size.clone());
+        }
+
+        if self.composefs_native {
+            args.push("--composefs-native".to_owned());
         }
 
         args
