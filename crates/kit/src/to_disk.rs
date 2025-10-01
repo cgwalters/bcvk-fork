@@ -262,8 +262,7 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
         let matches = crate::cache_metadata::check_cached_disk(
             opts.target_disk.as_std_path(),
             &image_digest,
-            opts.install.filesystem.as_deref(),
-            opts.install.root_size.as_deref(),
+            &opts.install,
             &opts.common.kernel_args,
         )?;
 
@@ -417,8 +416,7 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
             let write_result = write_disk_metadata(
                 &opts.source_image,
                 &opts.target_disk,
-                opts.install.filesystem.as_deref(),
-                opts.install.root_size.as_deref(),
+                &opts.install,
                 &opts.common.kernel_args,
                 &opts.format,
             );
@@ -439,8 +437,7 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
 fn write_disk_metadata(
     source_image: &str,
     target_disk: &Utf8PathBuf,
-    filesystem: Option<&str>,
-    root_size: Option<&str>,
+    install_options: &InstallOptions,
     kernel_args: &[String],
     format: &Format,
 ) -> Result<()> {
@@ -451,11 +448,8 @@ fn write_disk_metadata(
     let inspect = images::inspect(source_image)?;
     let digest = inspect.digest.to_string();
 
-    // Prepare metadata
-    let mut metadata = DiskImageMetadata::new(&digest);
-    metadata.filesystem = filesystem.map(|s| s.to_owned());
-    metadata.root_size = root_size.map(|s| s.to_string());
-    metadata.kernel_args = kernel_args.to_vec();
+    // Prepare metadata using the new helper method
+    let metadata = DiskImageMetadata::from(install_options, &digest, kernel_args);
 
     // Write metadata using rustix fsetxattr
     let file = std::fs::OpenOptions::new()
