@@ -65,6 +65,14 @@ pub struct LibvirtRunOpts {
     /// Mount host container storage (RO) at /run/virtiofs-mnt-hoststorage
     #[clap(long = "bind-storage-ro")]
     pub bind_storage_ro: bool,
+
+    /// Firmware type for the VM ("uefi", "uefi-secure", or "bios", defaults to "uefi")
+    #[clap(long, default_value = "uefi")]
+    pub firmware: String,
+
+    /// Disable TPM 2.0 support (enabled by default)
+    #[clap(long)]
+    pub disable_tpm: bool,
 }
 
 /// Execute the libvirt run command
@@ -542,6 +550,8 @@ fn create_libvirt_domain_from_disk(
         .with_vcpus(opts.cpus)
         .with_disk(disk_path.as_str())
         .with_network("none") // Use QEMU args for SSH networking instead
+        .with_firmware(&opts.firmware)
+        .with_tpm(!opts.disable_tpm)
         .with_metadata("bootc:source-image", &opts.image)
         .with_metadata("bootc:memory-mb", &opts.memory.to_string())
         .with_metadata("bootc:vcpus", &opts.cpus.to_string())

@@ -36,6 +36,8 @@ pub struct DomainBuilder {
     metadata: HashMap<String, String>,
     qemu_args: Vec<String>,
     virtiofs_filesystems: Vec<VirtiofsFilesystem>,
+    firmware: Option<String>, // "uefi" (default), "uefi-secure", or "bios"
+    tpm: bool,
 }
 
 impl Default for DomainBuilder {
@@ -59,6 +61,8 @@ impl DomainBuilder {
             metadata: HashMap::new(),
             qemu_args: Vec::new(),
             virtiofs_filesystems: Vec::new(),
+            firmware: None, // Defaults to UEFI
+            tpm: true,      // Default to enabled
         }
     }
 
@@ -122,6 +126,18 @@ impl DomainBuilder {
         self
     }
 
+    /// Set firmware type (\"uefi\", \"uefi-secure\", or \"bios\", defaults to \"uefi\")
+    pub fn with_firmware(mut self, firmware: &str) -> Self {
+        self.firmware = Some(firmware.to_string());
+        self
+    }
+
+    /// Enable TPM 2.0 support using swtpm
+    pub fn with_tpm(mut self, tpm: bool) -> Self {
+        self.tpm = tpm;
+        self
+    }
+
     /// Build the domain XML
     pub fn build_xml(self) -> Result<String> {
         let name = self.name.ok_or_else(|| eyre!("Domain name is required"))?;
@@ -160,8 +176,16 @@ impl DomainBuilder {
         )?;
         writer.write_text_element("vcpu", &vcpus.to_string())?;
 
-        // OS section
-        writer.start_element("os", &[])?;
+        // OS section with firmware configuration
+        let use_uefi = self.firmware.as_deref() != Some("bios");
+        let secure_boot = self.firmware.as_deref() == Some("uefi-secure");
+
+        if use_uefi {
+            writer.start_element("os", &[("firmware", "efi")])?;
+        } else {
+            writer.start_element("os", &[])?;
+        }
+
         writer.write_text_element_with_attrs(
             "type",
             &arch_config.os_type,
@@ -170,6 +194,12 @@ impl DomainBuilder {
                 ("machine", &arch_config.machine),
             ],
         )?;
+
+        if use_uefi && secure_boot {
+            // Modern libvirt handles firmware paths automatically for secure boot
+            writer.write_empty_element("loader", &[("secure", "yes")])?;
+        }
+
         writer.write_empty_element("boot", &[("dev", "hd")])?;
 
         // Add kernel arguments if specified (for direct boot)
@@ -281,6 +311,13 @@ impl DomainBuilder {
             writer.write_empty_element("source", &[("dir", &filesystem.source_dir)])?;
             writer.write_empty_element("target", &[("dir", &filesystem.tag)])?;
             writer.end_element("filesystem")?;
+        }
+
+        // TPM device
+        if self.tpm {
+            writer.start_element("tpm", &[("model", "tpm-tis")])?;
+            writer.write_empty_element("backend", &[("type", "emulator"), ("version", "2.0")])?;
+            writer.end_element("tpm")?;
         }
 
         writer.end_element("devices")?;
@@ -435,6 +472,78 @@ mod tests {
         assert!(xml.contains("<features>"));
         assert!(xml.contains("<acpi/>"));
         assert!(xml.contains("<timer name=\"rtc\""));
+    }
+
+    #[test]
+    fn test_secure_boot_configuration() {
+        let builder = DomainBuilder::new()
+            .with_name("test-secure-boot")
+            .with_firmware("uefi-secure");
+
+        let xml = builder.build_xml().unwrap();
+
+        // Should include secure boot loader configuration
+        assert!(xml.contains("loader"));
+        assert!(xml.contains("secure=\"yes\""));
+
+        // Should use firmware="efi" for UEFI
+        assert!(xml.contains("firmware=\"efi\""));
+
+        // Test regular UEFI without secure boot
+        let xml_regular = DomainBuilder::new()
+            .with_name("test-regular-uefi")
+            .with_firmware("uefi")
+            .build_xml()
+            .unwrap();
+
+        // Should use libvirt auto firmware selection
+        assert!(xml_regular.contains("firmware=\"efi\""));
+        assert!(!xml_regular.contains("secure=\"yes\""));
+
+        // Test BIOS firmware (no secure boot)
+        let xml_bios = DomainBuilder::new()
+            .with_name("test-bios")
+            .with_firmware("bios")
+            .build_xml()
+            .unwrap();
+
+        // Should not have firmware="efi" or secure boot settings
+        assert!(!xml_bios.contains("firmware=\"efi\""));
+        assert!(!xml_bios.contains("secure=\"yes\""));
+    }
+
+    #[test]
+    fn test_tpm_configuration() {
+        // Test TPM enabled (default)
+        let xml = DomainBuilder::new()
+            .with_name("test-tpm-enabled")
+            .build_xml()
+            .unwrap();
+
+        // Should include TPM device by default
+        assert!(xml.contains("<tpm model=\"tpm-tis\">"));
+        assert!(xml.contains("<backend type=\"emulator\" version=\"2.0\"/>"));
+
+        // Test TPM explicitly enabled
+        let xml_enabled = DomainBuilder::new()
+            .with_name("test-tpm-explicit")
+            .with_tpm(true)
+            .build_xml()
+            .unwrap();
+
+        assert!(xml_enabled.contains("<tpm model=\"tpm-tis\">"));
+        assert!(xml_enabled.contains("backend type=\"emulator\""));
+
+        // Test TPM disabled
+        let xml_disabled = DomainBuilder::new()
+            .with_name("test-tpm-disabled")
+            .with_tpm(false)
+            .build_xml()
+            .unwrap();
+
+        // Should not contain TPM configuration
+        assert!(!xml_disabled.contains("<tpm"));
+        assert!(!xml_disabled.contains("backend type=\"emulator\""));
     }
 
     #[test]
