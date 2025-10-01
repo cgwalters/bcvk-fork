@@ -73,6 +73,16 @@ Run a bootable container as a persistent VM
 
     Mount host container storage (RO) at /run/virtiofs-mnt-hoststorage
 
+**--firmware**=*FIRMWARE*
+
+    Firmware type for the VM ("uefi", "uefi-secure", or "bios", defaults to "uefi")
+
+    Default: uefi
+
+**--disable-tpm**
+
+    Disable TPM 2.0 support (enabled by default)
+
 <!-- END GENERATED OPTIONS -->
 
 # EXAMPLES

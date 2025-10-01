@@ -85,6 +85,16 @@ Create and start domains from uploaded bootc volumes
 
     Size of the disk image for automatic upload (e.g., '20G', '10240M')
 
+**--firmware**=*FIRMWARE*
+
+    Firmware type for the VM (\"uefi\", \"uefi-secure\", or \"bios\", defaults to \"uefi\")
+
+    Default: uefi
+
+**--disable-tpm**
+
+    Disable TPM 2.0 support (enabled by default)
+
 **--memory**=*MEMORY*
 
     Memory size (e.g. 4G, 2048M, or plain number for MB)

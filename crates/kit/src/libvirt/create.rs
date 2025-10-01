@@ -81,6 +81,14 @@ pub struct LibvirtCreateOpts {
     #[clap(long)]
     pub disk_size: Option<String>,
 
+    /// Firmware type for the VM (\"uefi\", \"uefi-secure\", or \"bios\", defaults to \"uefi\")
+    #[clap(long, default_value = "uefi")]
+    pub firmware: String,
+
+    /// Disable TPM 2.0 support (enabled by default)
+    #[clap(long)]
+    pub disable_tpm: bool,
+
     /// Memory size for installation VM during auto-upload (e.g. 2G, 1024M)
     #[clap(flatten)]
     pub install_memory: MemoryOpts,
@@ -487,7 +495,9 @@ impl LibvirtCreateOpts {
             .with_memory(memory_mb)
             .with_vcpus(self.vcpus.unwrap_or_else(default_vcpus))
             .with_disk(&domain_volume_path)
-            .with_network(network_config);
+            .with_network(network_config)
+            .with_firmware(&self.firmware)
+            .with_tpm(!self.disable_tpm);
 
         // Add QEMU arguments if we have any
         if !qemu_args.is_empty() {
