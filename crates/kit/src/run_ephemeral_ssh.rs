@@ -122,7 +122,7 @@ pub fn wait_for_ssh_ready(
         progress.set_message(format!("Polling for SSH readiness (attempt {attempt})"));
 
         // Try to connect via SSH and run a simple command using the centralized SSH function
-        let status = crate::ssh::connect_via_container_with_options(
+        let status = crate::ssh::connect(
             container_name,
             vec!["true".to_string()], // Just run 'true' to test connectivity
             &ssh_options,
@@ -167,7 +167,11 @@ pub fn run_ephemeral_ssh(opts: RunEphemeralSshOpts) -> Result<()> {
     // Execute SSH connection directly (no thread needed for this)
     // This allows SSH output to be properly forwarded to stdout/stderr
     debug!("Connecting to SSH with args: {:?}", opts.ssh_args);
-    let status = ssh::connect_via_container_with_status(&container_name, opts.ssh_args)?;
+    let status = ssh::connect(
+        &container_name,
+        opts.ssh_args,
+        &ssh::SshConnectionOptions::default(),
+    )?;
     debug!("SSH connection completed");
 
     let exit_code = status.code().unwrap_or(1);
