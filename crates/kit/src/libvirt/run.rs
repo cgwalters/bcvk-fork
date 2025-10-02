@@ -144,6 +144,7 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
             disk_size: Some(opts.disk_size.clone()),
             format: crate::to_disk::Format::Raw, // Default to raw format
             install: opts.install.clone(),
+            install_log: None,
             common: CommonVmOpts {
                 memory: opts.memory.clone(),
                 vcpus: Some(opts.cpus),

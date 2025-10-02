@@ -288,6 +288,7 @@ pub fn run(opts: LibvirtUploadDiskOpts) -> Result<()> {
         disk_size: Some(disk_size.to_string()),
         format: crate::to_disk::Format::Raw, // Default to raw format
         label: Default::default(),
+        install_log: None,
         common: crate::run_ephemeral::CommonVmOpts {
             memory: opts.memory.clone(),
             vcpus: opts.vcpus,

@@ -103,6 +103,10 @@ The installation process:
 
     Generate SSH keypair and inject via systemd credentials
 
+**--install-log**=*INSTALL_LOG*
+
+    Configure logging for `bootc install` by setting the `RUST_LOG` environment variable
+
 **--label**=*LABEL*
 
     Add metadata to the container in key=value form
