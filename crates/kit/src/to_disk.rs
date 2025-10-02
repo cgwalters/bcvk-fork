@@ -139,6 +139,10 @@ pub struct ToDiskOpts {
     #[clap(flatten)]
     pub common: CommonVmOpts,
 
+    /// Configure logging for `bootc install` by setting the `RUST_LOG` environment variable.
+    #[clap(long)]
+    pub install_log: Option<String>,
+
     #[clap(
         long = "label",
         help = "Add metadata to the container in key=value form"
@@ -184,6 +188,14 @@ impl ToDiskOpts {
             .map_err(|e| eyre!("Failed to quote source imgref '{}': {}", source_imgref, e))?
             .to_string();
 
+        let install_log = self
+            .install_log
+            .as_deref()
+            .map(|v| shlex::try_quote(v))
+            .transpose()?
+            .map(|v| format!("RUST_LOG={v}"))
+            .unwrap_or_default();
+
         // Create the complete script by substituting variables directly
         let script = indoc! {r#"
             set -euo pipefail
@@ -198,6 +210,7 @@ impl ToDiskOpts {
 
             # Execute bootc installation
             env STORAGE_OPTS=additionalimagestore=/run/virtiofs-mnt-hoststorage/ \
+                {INSTALL_LOG} \
                 bootc install to-disk \
                 --generic-image \
                 --skip-fetch-check \
@@ -208,6 +221,7 @@ impl ToDiskOpts {
             echo "Installation completed successfully!"
         "#}
         .replace("{SOURCE_IMGREF}", &quoted_source_imgref)
+        .replace("{INSTALL_LOG}", &install_log)
         .replace("{BOOTC_ARGS}", &bootc_args);
 
         Ok(vec!["/bin/bash".to_string(), "-c".to_string(), script])
@@ -492,6 +506,7 @@ mod tests {
             source_image: "test:latest".to_string(),
             target_disk: "/tmp/test.img".into(),
             label: Default::default(),
+            install_log: None,
             install: InstallOptions {
                 filesystem: Some("ext4".to_string()),
                 ..Default::default()
@@ -510,6 +525,7 @@ mod tests {
             source_image: "test:latest".to_string(),
             target_disk: "/tmp/test.img".into(),
             label: Default::default(),
+            install_log: None,
             install: InstallOptions {
                 filesystem: Some("ext4".to_string()),
                 ..Default::default()
