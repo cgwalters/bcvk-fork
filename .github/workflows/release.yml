@@ -16,10 +16,18 @@ jobs:
        contains(github.event.pull_request.labels.*.name, 'release'))
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
 
       - name: Extract version
         id: extract_version
@@ -37,7 +45,18 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "TAG_NAME=v$VERSION" >> $GITHUB_OUTPUT
 
+      - name: Import GPG key
+        if: github.event_name != 'push'
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+          git_tag_gpgsign: true
+
       - name: Create and push tag
+        if: github.event_name != 'push'
         run: |
           VERSION="${{ steps.extract_version.outputs.version }}"
           TAG_NAME="v$VERSION"
@@ -47,8 +66,9 @@ jobs:
             exit 0
           fi
 
-          git tag -a -m "Release $VERSION" "$TAG_NAME"
+          git tag -s -m "Release $VERSION" "$TAG_NAME"
           git push origin "$TAG_NAME"
+          git checkout "$TAG_NAME"
 
           echo "Successfully created and pushed tag $TAG_NAME"
 
@@ -65,17 +85,28 @@ jobs:
         with:
           key: release-build
 
-      - name: Build and archive
+      - name: Install additional dependencies
         run: |
+          # Install cargo-vendor-filterer for creating vendor archives
+          cargo install cargo-vendor-filterer --locked
+
+      - name: Build binaries and create archives
+        run: |
+          # Build release binaries
           just build
+          
+          # Create binary archives (existing functionality)
           just archive
+          
+          # Create source and vendor archives for distribution
+          cargo xtask package
         env:
           CARGO_PROFILE_RELEASE_LTO: true
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
 
       - name: Create release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           VERSION="${{ steps.extract_version.outputs.version }}"
           TAG_NAME="${{ steps.extract_version.outputs.TAG_NAME }}"
@@ -85,6 +116,7 @@ jobs:
           fi
           
           gh release create "$TAG_NAME" \
+            --draft \
             --title "Release $TAG_NAME" \
             --notes "Release $TAG_NAME
           
@@ -108,10 +140,17 @@ jobs:
 
       - name: Upload to release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           cd target
+          # Upload binary archives and checksums
           for file in bcvk-*.tar.gz bcvk-*.tar.gz.sha256; do
-            echo "Uploading $file"
+            echo "Uploading binary archive: $file"
+            gh release upload "${{ steps.extract_version.outputs.TAG_NAME }}" "$file" --clobber
+          done
+          
+          # Upload source and vendor archives
+          for file in bcvk-*.tar.zstd; do
+            echo "Uploading source archive: $file"
             gh release upload "${{ steps.extract_version.outputs.TAG_NAME }}" "$file" --clobber
           done
