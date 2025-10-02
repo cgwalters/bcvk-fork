@@ -91,91 +91,96 @@ pub fn generate_default_keypair() -> Result<SshKeyPair> {
 /// VMs and provides isolated, secure access without requiring direct host network
 /// configuration.
 ///
-/// # Connection Architecture
-///
-/// ```text
-/// Host → Podman Container → SSH → VM (localhost:2222)
-///        │                │
-///        └─ SSH Key at    └─ QEMU port forwarding
-///           /tmp/ssh         (guest:22 → host:2222)
-/// ```
-///
 /// # Arguments
 ///
 /// * `container_name` - Name of the podman container hosting the VM
-/// * `_ssh_key` - Path to SSH private key (unused - key is mounted at /tmp/ssh)
-/// * `ssh_user` - Username for SSH connection (typically "root")
 /// * `args` - Additional arguments to pass to the SSH command
-///
-/// # Container Requirements
-///
-/// This function requires:
-/// - Container exists and is in "running" state  
-/// - SSH private key is mounted at `/tmp/ssh` inside the container
-/// - QEMU is configured with port forwarding (guest:22 → host:2222)
-/// - SSH client is available inside the container
-///
-/// # Connection Process
-///
-/// 1. **Container Verification**: Checks if container exists and is running
-/// 2. **SSH Execution**: Runs `podman exec -it <container> ssh ...`
-/// 3. **Key Authentication**: Uses the key mounted at `/tmp/ssh`
-/// 4. **Port Forwarding**: Connects to 127.0.0.1:2222 (QEMU forwarding)
-///
-/// # SSH Configuration
-///
-/// The function configures SSH with secure, VM-appropriate settings:
-/// - Uses only the mounted key (`-i /tmp/ssh`)
-/// - Disables all other authentication methods
-/// - Skips host key checking (ephemeral VMs)
-/// - Reduces log verbosity to ERROR level
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - Container doesn't exist or isn't running
-/// - Podman exec command fails
-/// - SSH connection to VM fails
-/// - VM's SSH service isn't accessible
+/// * `options` - SSH connection configuration options
 ///
 /// # Example
 ///
 /// ```rust,no_run
-/// use bootc_kit::ssh::connect_via_container;
+/// use bootc_kit::ssh::{connect, SshConnectionOptions};
 ///
-/// // Interactive SSH session
-/// connect_via_container("bootc-vm-abc123", vec![])?;
+/// // Interactive SSH session with default options
+/// connect("bootc-vm-abc123", vec![], &SshConnectionOptions::default())?;
 ///
 /// // Run a specific command
 /// let args = vec!["systemctl".to_string(), "status".to_string()];
-/// connect_via_container("bootc-vm-abc123", args)?;
+/// connect("bootc-vm-abc123", args, &SshConnectionOptions::default())?;
 /// ```
-///
-/// # Generated Command Structure
-///
-/// The function generates a command like:
-/// ```bash
-/// podman exec -it bootc-vm-abc123 ssh \
-///     -i /tmp/ssh \
-///     -o IdentitiesOnly=yes \
-///     -o PasswordAuthentication=no \
-///     -o KbdInteractiveAuthentication=no \
-///     -o GSSAPIAuthentication=no \
-///     -o StrictHostKeyChecking=no \
-///     -o UserKnownHostsFile=/dev/null \
-///     -o LogLevel=ERROR \
-///     root@127.0.0.1 -p 2222 \
-///     -- [additional args]
-/// ```
-///
-/// # Security Notes
-///
-/// - SSH key is isolated within the container environment
-/// - No host networking configuration required  
-/// - Container provides additional isolation layer
-/// - VM network access is controlled by QEMU configuration
+pub fn connect(
+    container_name: &str,
+    args: Vec<String>,
+    options: &SshConnectionOptions,
+) -> Result<std::process::ExitStatus> {
+    debug!("Connecting to VM via container: {}", container_name);
+
+    // Verify container exists and is running
+    verify_container_running(container_name)?;
+
+    // Build podman exec command
+    let mut cmd = Command::new("podman");
+    if options.allocate_tty {
+        cmd.args(["exec", "-it", container_name, "ssh"]);
+    } else {
+        cmd.args(["exec", container_name, "ssh"]);
+    }
+
+    // SSH key path (hardcoded for container environment)
+    let keypath = Utf8Path::new("/run/tmproot")
+        .join(CONTAINER_STATEDIR.trim_start_matches('/'))
+        .join("ssh");
+    cmd.args(["-i", keypath.as_str()]);
+
+    // Apply common SSH options
+    options.common.apply_to_command(&mut cmd);
+
+    // No prompts from SSH
+    cmd.args(["-o", "BatchMode=yes"]);
+
+    // Even if we're providing a remote command, always allocate a tty
+    // so progress bars work because we're running synchronously.
+    if options.allocate_tty {
+        cmd.arg("-t");
+    }
+
+    // Connect to VM via QEMU port forwarding on localhost
+    cmd.arg("root@127.0.0.1");
+    cmd.args(["-p", "2222"]);
+
+    // Add any additional arguments
+    let ssh_args = build_ssh_command(&args)?;
+    if !ssh_args.is_empty() {
+        debug!("Adding SSH arguments: {:?}", ssh_args);
+        cmd.args(&ssh_args);
+    }
+
+    debug!("Executing: podman {:?}", cmd.get_args().collect::<Vec<_>>());
+    debug!(
+        "Full command line: podman {}",
+        cmd.get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+
+    // Suppress output if requested (useful for connectivity testing)
+    if options.suppress_output {
+        cmd.stdout(Stdio::null()).stderr(Stdio::null());
+    } else {
+        // Explicitly inherit stdout/stderr to prevent them from being closed
+        cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    }
+
+    // Execute the command and return status
+    cmd.status()
+        .map_err(|e| eyre!("Failed to execute SSH command: {}", e))
+}
+
+/// Convenience function for connecting with error handling (non-zero exit = error)
 pub fn connect_via_container(container_name: &str, args: Vec<String>) -> Result<()> {
-    let status = connect_via_container_with_status(container_name, args)?;
+    let status = connect(container_name, args, &SshConnectionOptions::default())?;
     if !status.success() {
         return Err(eyre!(
             "SSH connection failed with exit code: {:?}",
@@ -280,18 +285,8 @@ impl SshConnectionOptions {
     }
 }
 
-/// Connect to VM via container-based SSH access with configurable options
-///
-/// This is the most flexible SSH connection function that allows full control
-/// over SSH options and connection parameters.
-pub fn connect_via_container_with_options(
-    container_name: &str,
-    args: Vec<String>,
-    options: &SshConnectionOptions,
-) -> Result<std::process::ExitStatus> {
-    debug!("Connecting to VM via container: {}", container_name);
-
-    // Verify container exists and is running
+/// Verify that a container exists and is running
+fn verify_container_running(container_name: &str) -> Result<()> {
     let status = Command::new("podman")
         .args(["inspect", container_name, "--format", "{{.State.Status}}"])
         .output()
@@ -310,81 +305,32 @@ pub fn connect_via_container_with_options(
         ));
     }
 
-    // Build podman exec command
-    let mut cmd = Command::new("podman");
-    if options.allocate_tty {
-        cmd.args(["exec", "-it", container_name, "ssh"]);
-    } else {
-        cmd.args(["exec", container_name, "ssh"]);
-    }
-
-    // SSH key
-    let keypath = Utf8Path::new("/run/tmproot")
-        .join(CONTAINER_STATEDIR.trim_start_matches('/'))
-        .join("ssh");
-    cmd.args(["-i", keypath.as_str()]);
-
-    // Apply common SSH options
-    options.common.apply_to_command(&mut cmd);
-
-    // Container SSH always uses batch mode for non-interactive commands
-    if !options.allocate_tty {
-        cmd.args(["-o", "BatchMode=yes"]);
-    }
-
-    // Connect to VM via QEMU port forwarding on localhost
-    cmd.arg(&format!("root@127.0.0.1"));
-    cmd.args(["-p", "2222"]); // Use the forwarded port
-
-    // Add any additional arguments
-    if !args.is_empty() {
-        debug!("Adding SSH arguments: {:?}", args);
-        cmd.arg("--");
-
-        // If we have multiple arguments, we need to properly combine them into a single
-        // command string that will survive shell parsing on the remote side.
-        // This is because SSH protocol sends commands as strings, not argument arrays.
-        if args.len() > 1 {
-            // Combine arguments with proper shell escaping
-            let combined_command = shell_escape_command(&args)
-                .map_err(|e| eyre!("Failed to escape shell command: {}", e))?;
-            debug!("Combined escaped command: {}", combined_command);
-            cmd.arg(combined_command);
-        } else {
-            // Single argument can be passed directly
-            cmd.args(&args);
-        }
-    }
-
-    debug!("Executing: podman {:?}", cmd.get_args().collect::<Vec<_>>());
-    debug!(
-        "Full command line: podman {}",
-        cmd.get_args()
-            .map(|s| s.to_string_lossy().to_string())
-            .collect::<Vec<_>>()
-            .join(" ")
-    );
-
-    // Suppress output if requested (useful for connectivity testing)
-    if options.suppress_output {
-        cmd.stdout(Stdio::null()).stderr(Stdio::null());
-    }
-
-    // Execute the command and return status
-    cmd.status()
-        .map_err(|e| eyre!("Failed to execute SSH command: {}", e))
+    Ok(())
 }
 
-/// Connect to VM via container-based SSH access, returning the exit status
-///
-/// Similar to `connect_via_container` but returns the process exit status
-/// instead of an error when SSH exits with non-zero code. This is useful
-/// for capturing the exit code of remote commands.
-pub fn connect_via_container_with_status(
-    container_name: &str,
-    args: Vec<String>,
-) -> Result<std::process::ExitStatus> {
-    connect_via_container_with_options(container_name, args, &SshConnectionOptions::default())
+/// Build SSH command with proper argument handling
+fn build_ssh_command(args: &[String]) -> Result<Vec<String>> {
+    if args.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let mut ssh_args = vec!["--".to_string()];
+
+    // If we have multiple arguments, we need to properly combine them into a single
+    // command string that will survive shell parsing on the remote side.
+    // This is because SSH protocol sends commands as strings, not argument arrays.
+    if args.len() > 1 {
+        // Combine arguments with proper shell escaping
+        let combined_command = shell_escape_command(args)
+            .map_err(|e| eyre!("Failed to escape shell command: {}", e))?;
+        debug!("Combined escaped command: {}", combined_command);
+        ssh_args.push(combined_command);
+    } else {
+        // Single argument can be passed directly
+        ssh_args.extend(args.iter().cloned());
+    }
+
+    Ok(ssh_args)
 }
 
 #[cfg(test)]

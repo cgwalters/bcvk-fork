@@ -195,7 +195,7 @@ impl ToDiskOpts {
             echo "Starting bootc installation..."
             echo "Source image: {SOURCE_IMGREF}"
             echo "Additional args: {BOOTC_ARGS}"
-            
+
             # Execute bootc installation
             env STORAGE_OPTS=additionalimagestore=/run/virtiofs-mnt-hoststorage/ \
                 bootc install to-disk \
@@ -397,7 +397,17 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
             "Executing installation via SSH: {:?}",
             bootc_install_command
         );
-        ssh::connect_via_container(&container_id, bootc_install_command)?;
+        let ssh_options = ssh::SshConnectionOptions {
+            allocate_tty: tty,
+            ..ssh::SshConnectionOptions::default()
+        };
+        let status = ssh::connect(&container_id, bootc_install_command, &ssh_options)?;
+        if !status.success() {
+            return Err(eyre!(
+                "SSH installation command failed with exit code: {:?}",
+                status.code()
+            ));
+        }
 
         Ok(())
     })();
