@@ -34,6 +34,11 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           persist-credentials: false
 
+      - name: Configure git safety
+        if: steps.check_schedule.outputs.should_release == 'true'
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Check if it's time for a release
         id: check_schedule
         run: |
@@ -60,6 +65,16 @@ jobs:
           else
             echo "should_release=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Import GPG key
+        if: steps.check_schedule.outputs.should_release == 'true'
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+          git_tag_gpgsign: true
 
       - name: Setup Rust
         if: steps.check_schedule.outputs.should_release == 'true'
@@ -104,6 +119,8 @@ jobs:
           branch: "release-${{ env.VERSION }}"
           delete-branch: true
           labels: release
+          signoff: true
+          sign-commits: true
           body: |
             ## Release ${{ env.VERSION }}
 

@@ -479,7 +479,7 @@ pub fn generate_man_pages(sh: &Shell) -> Result<()> {
 }
 
 /// Get version from Cargo.toml
-fn get_package_version() -> Result<String> {
+pub fn get_package_version() -> Result<String> {
     let cargo_toml =
         fs::read_to_string("crates/kit/Cargo.toml").context("Reading crates/kit/Cargo.toml")?;
 
@@ -493,6 +493,23 @@ fn get_package_version() -> Result<String> {
         .ok_or_else(|| eyre!("Could not find package.version in Cargo.toml"))?;
 
     Ok(format!("v{}", version))
+}
+
+/// Get raw version from Cargo.toml (without 'v' prefix)
+pub fn get_raw_package_version() -> Result<String> {
+    let cargo_toml =
+        fs::read_to_string("crates/kit/Cargo.toml").context("Reading crates/kit/Cargo.toml")?;
+
+    let parsed: toml::Table = cargo_toml.parse().context("Parsing Cargo.toml")?;
+
+    let version = parsed
+        .get("package")
+        .and_then(|p| p.as_table())
+        .and_then(|p| p.get("version"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| eyre!("Could not find package.version in Cargo.toml"))?;
+
+    Ok(version.to_string())
 }
 
 /// Single command to update all man pages - auto-discover new commands and sync existing ones
