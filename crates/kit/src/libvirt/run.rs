@@ -81,7 +81,7 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
     use crate::cache_metadata;
     use crate::images;
     use crate::run_ephemeral::CommonVmOpts;
-    use crate::to_disk::ToDiskOpts;
+    use crate::to_disk::{ToDiskAdditionalOpts, ToDiskOpts};
 
     let connect_uri = global_opts.connect.as_ref();
     let lister = match connect_uri {
@@ -141,22 +141,17 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
         let to_disk_opts = ToDiskOpts {
             source_image: opts.image.clone(),
             target_disk: disk_path.clone(),
-            disk_size: Some(opts.disk_size.clone()),
-            format: crate::to_disk::Format::Raw, // Default to raw format
             install: opts.install.clone(),
-            install_log: None,
-            common: CommonVmOpts {
-                memory: opts.memory.clone(),
-                vcpus: Some(opts.cpus),
-                kernel_args: vec![],
-                net: None,
-                console: false,
-                debug: false,
-                virtio_serial_out: vec![],
-                execute: vec![],
-                ssh_keygen: true, // Enable SSH key generation
+            additional: ToDiskAdditionalOpts {
+                disk_size: Some(opts.disk_size.clone()),
+                common: CommonVmOpts {
+                    memory: opts.memory.clone(),
+                    vcpus: Some(opts.cpus),
+                    ssh_keygen: true, // Enable SSH key generation
+                    ..Default::default()
+                },
+                ..Default::default()
             },
-            label: vec![],
         };
 
         // Run the disk creation

@@ -88,9 +88,10 @@ use indoc::indoc;
 use tracing::debug;
 
 /// Supported disk image formats
-#[derive(Debug, Clone, ValueEnum, PartialEq)]
+#[derive(Debug, Clone, ValueEnum, PartialEq, Default)]
 pub enum Format {
     /// Raw disk image format (default)
+    #[default]
     Raw,
     /// QEMU Copy On Write 2 format
     Qcow2,
@@ -112,21 +113,9 @@ impl std::fmt::Display for Format {
     }
 }
 
-/// Configuration options for installing a bootc container image to disk
-///
-/// See the module-level documentation for details on the installation architecture and workflow.
-#[derive(Debug, Parser)]
-pub struct ToDiskOpts {
-    /// Container image to install
-    pub source_image: String,
-
-    /// Target disk/device path
-    pub target_disk: Utf8PathBuf,
-
-    /// Installation options (filesystem, root-size, storage-path)
-    #[clap(flatten)]
-    pub install: InstallOptions,
-
+/// Additional configuration options for installing a bootc container image to disk
+#[derive(Debug, Parser, Default)]
+pub struct ToDiskAdditionalOpts {
     /// Disk size to create (e.g. 10G, 5120M, or plain number for bytes)
     #[clap(long)]
     pub disk_size: Option<String>,
@@ -148,6 +137,26 @@ pub struct ToDiskOpts {
         help = "Add metadata to the container in key=value form"
     )]
     pub label: Vec<String>,
+}
+
+/// Configuration options for installing a bootc container image to disk
+///
+/// See the module-level documentation for details on the installation architecture and workflow.
+#[derive(Debug, Parser)]
+pub struct ToDiskOpts {
+    /// Container image to install
+    pub source_image: String,
+
+    /// Target disk/device path
+    pub target_disk: Utf8PathBuf,
+
+    /// Installation options (filesystem, root-size, storage-path)
+    #[clap(flatten)]
+    pub install: InstallOptions,
+
+    /// Additional installation options
+    #[clap(flatten)]
+    pub additional: ToDiskAdditionalOpts,
 }
 
 impl ToDiskOpts {
@@ -189,6 +198,7 @@ impl ToDiskOpts {
             .to_string();
 
         let install_log = self
+            .additional
             .install_log
             .as_deref()
             .map(|v| shlex::try_quote(v))
@@ -232,7 +242,7 @@ impl ToDiskOpts {
     /// Returns explicit disk_size if provided (parsed from human-readable format),
     /// otherwise 2x the image size with a 4GB minimum.
     fn calculate_disk_size(&self) -> Result<u64> {
-        if let Some(ref size_str) = self.disk_size {
+        if let Some(ref size_str) = self.additional.disk_size {
             let parsed = utils::parse_size(size_str)?;
             debug!("Using explicit disk size: {} -> {} bytes", size_str, parsed);
             return Ok(parsed);
@@ -277,7 +287,7 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
             opts.target_disk.as_std_path(),
             &image_digest,
             &opts.install,
-            &opts.common.kernel_args,
+            &opts.additional.common.kernel_args,
         )?;
 
         if matches {
@@ -299,7 +309,7 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
     let storage_path = opts.get_storage_path()?;
 
     // Debug logging for installation configuration
-    if opts.common.debug {
+    if opts.additional.common.debug {
         debug!("Using container storage: {:?}", storage_path);
         debug!("Installing to target disk: {:?}", opts.target_disk);
         debug!("Filesystem: {:?}", opts.install.filesystem);
@@ -311,7 +321,7 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
     let disk_size = opts.calculate_disk_size()?;
 
     // Create disk image based on format
-    match opts.format {
+    match opts.additional.format {
         Format::Raw => {
             // Create sparse file - only allocates space as data is written
             let file = std::fs::File::create(&opts.target_disk)
@@ -352,7 +362,7 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
     let bootc_install_command = opts.generate_bootc_install_command()?;
 
     // Phase 4: Ephemeral VM configuration
-    let mut common_opts = opts.common.clone();
+    let mut common_opts = opts.additional.common.clone();
     // Enable SSH key generation for SSH-based installation
     common_opts.ssh_keygen = true;
 
@@ -370,22 +380,22 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
             rm: true,     // Clean up container after installation
             detach: true, // Run in detached mode for SSH approach
             tty,
-            label: opts.label,
+            label: opts.additional.label,
             ..Default::default()
         },
         // Workaround for https://github.com/containers/container-libs/issues/144#issuecomment-3300424410
         // Basically containers-libs allocates a tempfile for a whole serialization of a layer as a tarball
         // when fetching, so we need enough memory to do so.
         add_swap: Some(format!("{disk_size}")),
-        bind_mounts: Vec::new(),        // No additional bind mounts needed
-        ro_bind_mounts: Vec::new(),     // No additional ro bind mounts needed
-        systemd_units_dir: None,        // No custom systemd units
-        log_cmdline: opts.common.debug, // Log kernel command line if debug
-        bind_storage_ro: true,          // Mount host container storage read-only
+        bind_mounts: Vec::new(),    // No additional bind mounts needed
+        ro_bind_mounts: Vec::new(), // No additional ro bind mounts needed
+        systemd_units_dir: None,    // No custom systemd units
+        log_cmdline: opts.additional.common.debug, // Log kernel command line if debug
+        bind_storage_ro: true,      // Mount host container storage read-only
         mount_disk_files: vec![format!(
             "{}:output:{}",
             opts.target_disk,
-            opts.format.as_str()
+            opts.additional.format.as_str()
         )], // Attach target disk
     };
 
@@ -441,8 +451,8 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
                 &opts.source_image,
                 &opts.target_disk,
                 &opts.install,
-                &opts.common.kernel_args,
-                &opts.format,
+                &opts.additional.common.kernel_args,
+                &opts.additional.format,
             );
             if let Err(e) = write_result {
                 debug!("Failed to write metadata to disk image: {}", e);
@@ -505,15 +515,14 @@ mod tests {
         let opts = ToDiskOpts {
             source_image: "test:latest".to_string(),
             target_disk: "/tmp/test.img".into(),
-            label: Default::default(),
-            install_log: None,
             install: InstallOptions {
                 filesystem: Some("ext4".to_string()),
                 ..Default::default()
             },
-            disk_size: Some("10G".to_string()),
-            format: Format::Raw,
-            common: CommonVmOpts::default(),
+            additional: ToDiskAdditionalOpts {
+                disk_size: Some("10G".to_string()),
+                ..Default::default()
+            },
         };
 
         let size = opts.calculate_disk_size()?;
@@ -524,15 +533,14 @@ mod tests {
         let opts2 = ToDiskOpts {
             source_image: "test:latest".to_string(),
             target_disk: "/tmp/test.img".into(),
-            label: Default::default(),
-            install_log: None,
             install: InstallOptions {
                 filesystem: Some("ext4".to_string()),
                 ..Default::default()
             },
-            disk_size: Some("5120M".to_string()),
-            format: Format::Raw,
-            common: CommonVmOpts::default(),
+            additional: ToDiskAdditionalOpts {
+                disk_size: Some("5120M".to_string()),
+                ..Default::default()
+            },
         };
 
         let size2 = opts2.calculate_disk_size()?;

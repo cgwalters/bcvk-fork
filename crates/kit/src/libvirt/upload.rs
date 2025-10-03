@@ -5,7 +5,7 @@
 
 use crate::common_opts::MemoryOpts;
 use crate::install_options::InstallOptions;
-use crate::to_disk::{run as to_disk, ToDiskOpts};
+use crate::to_disk::{run as to_disk, ToDiskAdditionalOpts, ToDiskOpts};
 use crate::{images, utils};
 use camino::Utf8PathBuf;
 use clap::Parser;
@@ -214,20 +214,16 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtUploadOpts
         source_image: opts.source_image.clone(),
         target_disk: temp_disk_path.clone(),
         install: opts.install.clone(),
-        format: crate::to_disk::Format::Raw, // Default to raw format
-        disk_size: Some(disk_size.to_string()),
-        label: Default::default(),
-        install_log: None,
-        common: crate::run_ephemeral::CommonVmOpts {
-            memory: opts.memory.clone(),
-            vcpus: opts.vcpus,
-            kernel_args: opts.karg.clone(),
-            net: Some("none".to_string()),
-            console: false,
-            debug: false,
-            virtio_serial_out: vec![],
-            execute: Default::default(),
-            ssh_keygen: false,
+        additional: ToDiskAdditionalOpts {
+            disk_size: Some(disk_size.to_string()),
+            common: crate::run_ephemeral::CommonVmOpts {
+                memory: opts.memory.clone(),
+                vcpus: opts.vcpus,
+                kernel_args: opts.karg.clone(),
+                net: Some("none".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
         },
     };
 
