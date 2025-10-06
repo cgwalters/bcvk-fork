@@ -8,6 +8,7 @@ use crate::common_opts::{MemoryOpts, DEFAULT_MEMORY_USER_STR};
 use crate::images;
 use crate::install_options::InstallOptions;
 use crate::libvirt::domain::DomainBuilder;
+use crate::libvirt::run::FirmwareType;
 use crate::libvirt::upload::LibvirtUploadOpts;
 use crate::run_ephemeral::default_vcpus;
 use crate::ssh::generate_ssh_keypair;
@@ -81,9 +82,9 @@ pub struct LibvirtCreateOpts {
     #[clap(long)]
     pub disk_size: Option<String>,
 
-    /// Firmware type for the VM (\"uefi\", \"uefi-secure\", or \"bios\", defaults to \"uefi\")
-    #[clap(long, default_value = "uefi")]
-    pub firmware: String,
+    /// Firmware type for the VM (defaults to uefi-secure)
+    #[clap(long, default_value = "uefi-secure")]
+    pub firmware: FirmwareType,
 
     /// Disable TPM 2.0 support (enabled by default)
     #[clap(long)]
@@ -496,7 +497,7 @@ impl LibvirtCreateOpts {
             .with_vcpus(self.vcpus.unwrap_or_else(default_vcpus))
             .with_disk(&domain_volume_path)
             .with_network(network_config)
-            .with_firmware(&self.firmware)
+            .with_firmware(self.firmware)
             .with_tpm(!self.disable_tpm);
 
         // Add QEMU arguments if we have any

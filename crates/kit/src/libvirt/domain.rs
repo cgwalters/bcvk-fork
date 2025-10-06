@@ -5,6 +5,7 @@
 
 use crate::arch::ArchConfig;
 use crate::common_opts::DEFAULT_MEMORY_USER_STR;
+use crate::libvirt::run::FirmwareType;
 use crate::run_ephemeral::default_vcpus;
 use crate::xml_utils::XmlWriter;
 use color_eyre::{eyre::eyre, Result};
@@ -36,8 +37,10 @@ pub struct DomainBuilder {
     metadata: HashMap<String, String>,
     qemu_args: Vec<String>,
     virtiofs_filesystems: Vec<VirtiofsFilesystem>,
-    firmware: Option<String>, // "uefi" (default), "uefi-secure", or "bios"
+    firmware: Option<FirmwareType>,
     tpm: bool,
+    ovmf_code_path: Option<String>, // Custom OVMF_CODE path for secure boot
+    nvram_template: Option<String>, // Custom NVRAM template with enrolled keys
 }
 
 impl Default for DomainBuilder {
@@ -63,6 +66,8 @@ impl DomainBuilder {
             virtiofs_filesystems: Vec::new(),
             firmware: None, // Defaults to UEFI
             tpm: true,      // Default to enabled
+            ovmf_code_path: None,
+            nvram_template: None,
         }
     }
 
@@ -126,15 +131,27 @@ impl DomainBuilder {
         self
     }
 
-    /// Set firmware type (\"uefi\", \"uefi-secure\", or \"bios\", defaults to \"uefi\")
-    pub fn with_firmware(mut self, firmware: &str) -> Self {
-        self.firmware = Some(firmware.to_string());
+    /// Set firmware type (defaults to uefi-secure)
+    pub fn with_firmware(mut self, firmware: FirmwareType) -> Self {
+        self.firmware = Some(firmware);
         self
     }
 
     /// Enable TPM 2.0 support using swtpm
     pub fn with_tpm(mut self, tpm: bool) -> Self {
         self.tpm = tpm;
+        self
+    }
+
+    /// Set custom OVMF_CODE path for secure boot
+    pub fn with_ovmf_code_path(mut self, path: &str) -> Self {
+        self.ovmf_code_path = Some(path.to_string());
+        self
+    }
+
+    /// Set custom NVRAM template path with enrolled secure boot keys
+    pub fn with_nvram_template(mut self, path: &str) -> Self {
+        self.nvram_template = Some(path.to_string());
         self
     }
 
@@ -177,8 +194,10 @@ impl DomainBuilder {
         writer.write_text_element("vcpu", &vcpus.to_string())?;
 
         // OS section with firmware configuration
-        let use_uefi = self.firmware.as_deref() != Some("bios");
-        let secure_boot = self.firmware.as_deref() == Some("uefi-secure");
+        let use_uefi = self.firmware != Some(FirmwareType::Bios);
+        let secure_boot = use_uefi
+            && (self.firmware == Some(FirmwareType::UefiSecure) || self.ovmf_code_path.is_some());
+        let insecure_boot = self.firmware == Some(FirmwareType::UefiInsecure);
 
         if use_uefi {
             writer.start_element("os", &[("firmware", "efi")])?;
@@ -186,18 +205,43 @@ impl DomainBuilder {
             writer.start_element("os", &[])?;
         }
 
+        // For secure boot on x86_64, we may need a specific machine type with SMM
+        let machine_type = if secure_boot && arch_config.arch == "x86_64" {
+            "q35" // Modern libvirt will handle SMM automatically with q35
+        } else {
+            arch_config.machine
+        };
+
         writer.write_text_element_with_attrs(
             "type",
             &arch_config.os_type,
-            &[
-                ("arch", &arch_config.arch),
-                ("machine", &arch_config.machine),
-            ],
+            &[("arch", &arch_config.arch), ("machine", machine_type)],
         )?;
 
-        if use_uefi && secure_boot {
-            // Modern libvirt handles firmware paths automatically for secure boot
-            writer.write_empty_element("loader", &[("secure", "yes")])?;
+        if use_uefi {
+            if let Some(ref ovmf_code) = self.ovmf_code_path {
+                // Use custom OVMF_CODE path for secure boot
+                let mut loader_attrs = vec![("readonly", "yes"), ("type", "pflash")];
+                if secure_boot {
+                    loader_attrs.push(("secure", "yes"));
+                }
+                writer.write_text_element_with_attrs("loader", ovmf_code, &loader_attrs)?;
+
+                // Add NVRAM element if template is specified
+                if let Some(ref nvram_template) = self.nvram_template {
+                    writer.write_text_element_with_attrs(
+                        "nvram",
+                        "", // Empty content, template attr provides the source
+                        &[("template", nvram_template)],
+                    )?;
+                }
+            } else if secure_boot {
+                // Let libvirt auto-select firmware for secure boot
+                writer.write_empty_element("loader", &[("secure", "yes")])?;
+            } else if insecure_boot {
+                // Explicitly disable secure boot for uefi-insecure
+                writer.write_empty_element("loader", &[("secure", "no")])?;
+            }
         }
 
         writer.write_empty_element("boot", &[("dev", "hd")])?;
@@ -215,8 +259,21 @@ impl DomainBuilder {
         writer.write_empty_element("access", &[("mode", "shared")])?;
         writer.end_element("memoryBacking")?;
 
-        // Architecture-specific features
-        arch_config.write_features(&mut writer)?;
+        // Write features including SMM for secure boot
+        writer.start_element("features", &[])?;
+        writer.write_empty_element("acpi", &[])?;
+        writer.write_empty_element("apic", &[])?;
+
+        // Add x86_64-specific features
+        if arch_config.arch == "x86_64" {
+            writer.write_empty_element("vmport", &[("state", "off")])?;
+            // Add SMM support for secure boot on x86_64
+            if secure_boot {
+                writer.write_empty_element("smm", &[("state", "on")])?;
+            }
+        }
+
+        writer.end_element("features")?;
 
         // Architecture-specific CPU configuration
         writer.write_empty_element("cpu", &[("mode", arch_config.cpu_mode())])?;
@@ -478,7 +535,7 @@ mod tests {
     fn test_secure_boot_configuration() {
         let builder = DomainBuilder::new()
             .with_name("test-secure-boot")
-            .with_firmware("uefi-secure");
+            .with_firmware(FirmwareType::UefiSecure);
 
         let xml = builder.build_xml().unwrap();
 
@@ -489,21 +546,22 @@ mod tests {
         // Should use firmware="efi" for UEFI
         assert!(xml.contains("firmware=\"efi\""));
 
-        // Test regular UEFI without secure boot
-        let xml_regular = DomainBuilder::new()
-            .with_name("test-regular-uefi")
-            .with_firmware("uefi")
+        // Test UEFI insecure (secure boot explicitly disabled)
+        let xml_insecure = DomainBuilder::new()
+            .with_name("test-uefi-insecure")
+            .with_firmware(FirmwareType::UefiInsecure)
             .build_xml()
             .unwrap();
 
-        // Should use libvirt auto firmware selection
-        assert!(xml_regular.contains("firmware=\"efi\""));
-        assert!(!xml_regular.contains("secure=\"yes\""));
+        // Should use libvirt auto firmware selection with secure="no"
+        assert!(xml_insecure.contains("firmware=\"efi\""));
+        assert!(xml_insecure.contains("secure=\"no\""));
+        assert!(!xml_insecure.contains("secure=\"yes\""));
 
         // Test BIOS firmware (no secure boot)
         let xml_bios = DomainBuilder::new()
             .with_name("test-bios")
-            .with_firmware("bios")
+            .with_firmware(FirmwareType::Bios)
             .build_xml()
             .unwrap();
 
@@ -544,6 +602,34 @@ mod tests {
         // Should not contain TPM configuration
         assert!(!xml_disabled.contains("<tpm"));
         assert!(!xml_disabled.contains("backend type=\"emulator\""));
+    }
+
+    #[test]
+    fn test_secure_boot_with_custom_firmware() {
+        let xml = DomainBuilder::new()
+            .with_name("test-custom-secboot")
+            .with_firmware(FirmwareType::UefiSecure)
+            .with_ovmf_code_path("/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd")
+            .with_nvram_template("/var/lib/libvirt/qemu/nvram/custom_VARS.fd")
+            .build_xml()
+            .unwrap();
+
+        // Should have custom loader path
+        assert!(xml.contains("/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd"));
+
+        // Should have nvram template
+        assert!(xml.contains("nvram"));
+        assert!(xml.contains("template=\"/var/lib/libvirt/qemu/nvram/custom_VARS.fd\""));
+
+        // Should have secure loader attributes
+        assert!(xml.contains("readonly=\"yes\""));
+        assert!(xml.contains("type=\"pflash\""));
+        assert!(xml.contains("secure=\"yes\""));
+
+        // Should have SMM enabled for x86_64
+        if std::env::consts::ARCH == "x86_64" {
+            assert!(xml.contains("<smm state=\"on\"/>"));
+        }
     }
 
     #[test]

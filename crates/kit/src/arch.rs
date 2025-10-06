@@ -45,21 +45,6 @@ impl ArchConfig {
         }
     }
 
-    /// Generate architecture-specific XML features for libvirt
-    pub fn write_features(&self, writer: &mut XmlWriter) -> Result<()> {
-        writer.start_element("features", &[])?;
-        writer.write_empty_element("acpi", &[])?;
-        writer.write_empty_element("apic", &[])?;
-
-        // Add x86_64-specific features
-        if self.arch == "x86_64" {
-            writer.write_empty_element("vmport", &[("state", "off")])?;
-        }
-
-        writer.end_element("features")?;
-        Ok(())
-    }
-
     /// Generate architecture-specific timer configuration
     pub fn write_timers(&self, writer: &mut XmlWriter) -> Result<()> {
         // RTC timer is common to all architectures
@@ -128,14 +113,6 @@ mod tests {
     fn test_arch_specific_features() {
         let arch_config = ArchConfig::detect().unwrap();
 
-        // Test that we can generate features XML without errors
-        let mut writer = XmlWriter::new();
-        arch_config.write_features(&mut writer).unwrap();
-        let features_xml = writer.into_string().unwrap();
-        assert!(features_xml.contains("<features>"));
-        assert!(features_xml.contains("<acpi/>"));
-        assert!(features_xml.contains("</features>"));
-
         // Test that we can generate timers XML without errors
         let mut writer = XmlWriter::new();
         arch_config.write_timers(&mut writer).unwrap();
@@ -169,61 +146,5 @@ mod tests {
 
         // Should be mutually exclusive
         assert!(!(is_x86_64() && is_aarch64()));
-    }
-
-    /// Helper function to generate XML for testing
-    fn generate_xml<F>(config: &ArchConfig, writer_fn: F) -> String
-    where
-        F: FnOnce(&ArchConfig, &mut XmlWriter) -> Result<()>,
-    {
-        let mut writer = XmlWriter::new();
-        writer_fn(config, &mut writer).unwrap();
-        writer.into_string().unwrap()
-    }
-
-    #[test]
-    fn test_x86_64_specific_features() {
-        // Test x86_64 configuration specifically
-        let x86_config = ArchConfig {
-            arch: "x86_64",
-            machine: "q35",
-            os_type: "hvm",
-        };
-
-        let features_xml = generate_xml(&x86_config, |cfg, w| cfg.write_features(w));
-
-        // Should have x86_64-specific vmport feature
-        assert!(features_xml.contains("vmport"));
-        assert!(features_xml.contains("state=\"off\""));
-
-        let timers_xml = generate_xml(&x86_config, |cfg, w| cfg.write_timers(w));
-
-        // Should have x86_64-specific timers
-        assert!(timers_xml.contains("pit"));
-        assert!(timers_xml.contains("hpet"));
-        assert!(timers_xml.contains("present=\"no\""));
-    }
-
-    #[test]
-    fn test_aarch64_specific_features() {
-        // Test aarch64 configuration specifically
-        let arm_config = ArchConfig {
-            arch: "aarch64",
-            machine: "virt",
-            os_type: "hvm",
-        };
-
-        let features_xml = generate_xml(&arm_config, |cfg, w| cfg.write_features(w));
-
-        // Should NOT have x86_64-specific vmport feature
-        assert!(!features_xml.contains("vmport"));
-
-        let timers_xml = generate_xml(&arm_config, |cfg, w| cfg.write_timers(w));
-
-        // Should NOT have x86_64-specific timers
-        assert!(!timers_xml.contains("pit"));
-        assert!(!timers_xml.contains("hpet"));
-        // But should still have RTC
-        assert!(timers_xml.contains("rtc"));
     }
 }

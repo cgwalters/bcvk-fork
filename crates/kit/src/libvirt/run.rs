@@ -4,7 +4,7 @@
 //! libvirt-based VMs from bootc container images.
 
 use camino::{Utf8Path, Utf8PathBuf};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use color_eyre::{eyre::Context, Result};
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
@@ -17,6 +17,18 @@ use crate::install_options::InstallOptions;
 use crate::libvirt::domain::VirtiofsFilesystem;
 use crate::utils::parse_memory_to_mb;
 use crate::xml_utils;
+
+/// Firmware type for virtual machines
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum FirmwareType {
+    /// UEFI with secure boot enabled (default)
+    UefiSecure,
+    /// UEFI with secure boot explicitly disabled
+    UefiInsecure,
+    /// Legacy BIOS
+    Bios,
+}
 
 /// Options for creating and running a bootable container VM
 #[derive(Debug, Parser)]
@@ -67,13 +79,17 @@ pub struct LibvirtRunOpts {
     #[clap(long = "bind-storage-ro")]
     pub bind_storage_ro: bool,
 
-    /// Firmware type for the VM ("uefi", "uefi-secure", or "bios", defaults to "uefi")
-    #[clap(long, default_value = "uefi")]
-    pub firmware: String,
+    /// Firmware type for the VM (defaults to uefi-secure)
+    #[clap(long, default_value = "uefi-secure")]
+    pub firmware: FirmwareType,
 
     /// Disable TPM 2.0 support (enabled by default)
     #[clap(long)]
     pub disable_tpm: bool,
+
+    /// Directory containing secure boot keys (required for uefi-secure)
+    #[clap(long)]
+    pub secure_boot_keys: Option<String>,
 }
 
 /// Execute the libvirt run command
@@ -196,12 +212,11 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
 
 /// Get the path of the default libvirt storage pool
 fn get_libvirt_storage_pool_path(connect_uri: Option<&String>) -> Result<Utf8PathBuf> {
-    use std::process::Command;
-
     // If a specific connection URI is provided, use it
     if let Some(uri) = connect_uri {
-        let output = Command::new("virsh")
-            .args(&["-c", uri, "pool-dumpxml", "default"])
+        let mut cmd = crate::hostexec::command("virsh", None)?;
+        cmd.args(&["-c", uri, "pool-dumpxml", "default"]);
+        let output = cmd
             .output()
             .with_context(|| "Failed to query libvirt storage pool")?;
 
@@ -221,17 +236,17 @@ fn get_libvirt_storage_pool_path(connect_uri: Option<&String>) -> Result<Utf8Pat
     }
 
     // Try user session first (qemu:///session)
-    let output = Command::new("virsh")
-        .args(&["-c", "qemu:///session", "pool-dumpxml", "default"])
-        .output();
+    let mut cmd = crate::hostexec::command("virsh", None)?;
+    cmd.args(&["-c", "qemu:///session", "pool-dumpxml", "default"]);
+    let output = cmd.output();
 
     let output = match output {
         Ok(o) if o.status.success() => o,
         _ => {
             // Try system session (qemu:///system)
-            Command::new("virsh")
-                .args(&["-c", "qemu:///system", "pool-dumpxml", "default"])
-                .output()
+            let mut cmd = crate::hostexec::command("virsh", None)?;
+            cmd.args(&["-c", "qemu:///system", "pool-dumpxml", "default"]);
+            cmd.output()
                 .with_context(|| "Failed to query libvirt storage pool")?
         }
     };
@@ -531,6 +546,30 @@ fn create_libvirt_domain_from_disk(
         )
         .unwrap_or(None);
 
+    // Setup secure boot if requested
+    let secure_boot_config = if opts.firmware == FirmwareType::UefiSecure {
+        use crate::libvirt::secureboot;
+
+        // Require secure boot keys directory
+        let keys_dir = opts.secure_boot_keys.as_ref().ok_or_else(|| {
+            color_eyre::eyre::eyre!(
+                "--secure-boot-keys is required when using --firmware=uefi-secure"
+            )
+        })?;
+        let keys_dir = Utf8PathBuf::from(keys_dir);
+
+        info!("Setting up secure boot configuration from {}", keys_dir);
+        let config =
+            secureboot::setup_secure_boot(&keys_dir).context("Failed to setup secure boot")?;
+        Some(config)
+    } else if opts.secure_boot_keys.is_some() {
+        return Err(color_eyre::eyre::eyre!(
+            "--secure-boot-keys can only be used with --firmware=uefi-secure"
+        ));
+    } else {
+        None
+    };
+
     // Build domain XML using the existing DomainBuilder with bootc metadata and SSH keys
     let mut domain_builder = DomainBuilder::new()
         .with_name(domain_name)
@@ -538,7 +577,7 @@ fn create_libvirt_domain_from_disk(
         .with_vcpus(opts.cpus)
         .with_disk(disk_path.as_str())
         .with_network("none") // Use QEMU args for SSH networking instead
-        .with_firmware(&opts.firmware)
+        .with_firmware(opts.firmware)
         .with_tpm(!opts.disable_tpm)
         .with_metadata("bootc:source-image", &opts.image)
         .with_metadata("bootc:memory-mb", &opts.memory.to_string())
@@ -559,6 +598,19 @@ fn create_libvirt_domain_from_disk(
     // Add container image digest to XML for visibility if available
     if let Some(digest) = &container_image_digest {
         domain_builder = domain_builder.with_metadata("bootc:image-digest", digest);
+    }
+
+    // Add secure boot configuration if enabled
+    if let Some(ref sb_config) = secure_boot_config {
+        let ovmf_code = crate::libvirt::secureboot::find_ovmf_code_secboot()
+            .context("Failed to find OVMF_CODE.secboot.fd")?;
+        domain_builder = domain_builder
+            .with_ovmf_code_path(ovmf_code.as_str())
+            .with_nvram_template(sb_config.vars_template.as_str());
+
+        // Add secure boot keys path to metadata for reference
+        domain_builder =
+            domain_builder.with_metadata("bootc:secure-boot-keys", sb_config.key_dir.as_str());
     }
 
     // Add container storage mount if requested
