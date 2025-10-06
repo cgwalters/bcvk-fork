@@ -43,9 +43,19 @@ Run a bootable container as a persistent VM
 
 **--filesystem**=*FILESYSTEM*
 
-    Root filesystem type for installation
+    Root filesystem type (e.g. ext4, xfs, btrfs)
 
-    Default: ext4
+**--root-size**=*ROOT_SIZE*
+
+    Root filesystem size (e.g., '10G', '5120M')
+
+**--storage-path**=*STORAGE_PATH*
+
+    Path to host container storage (auto-detected if not specified)
+
+**--composefs-native**
+
+    Default to composefs-native storage
 
 **-p**, **--port**=*PORT_MAPPINGS*
 
@@ -75,13 +85,22 @@ Run a bootable container as a persistent VM
 
 **--firmware**=*FIRMWARE*
 
-    Firmware type for the VM ("uefi", "uefi-secure", or "bios", defaults to "uefi")
+    Firmware type for the VM (defaults to uefi-secure)
 
-    Default: uefi
+    Possible values:
+    - uefi-secure
+    - uefi-insecure
+    - bios
+
+    Default: uefi-secure
 
 **--disable-tpm**
 
     Disable TPM 2.0 support (enabled by default)
+
+**--secure-boot-keys**=*SECURE_BOOT_KEYS*
+
+    Directory containing secure boot keys (required for uefi-secure)
 
 <!-- END GENERATED OPTIONS -->
 

@@ -159,6 +159,93 @@ env STORAGE_OPTS=additionalimagestore=/run/virtiofs-mnt-hoststorage bootc upgrad
 
 will work.
 
+## Secure Boot Configuration
+
+UEFI Secure Boot ensures that only signed and trusted software can run during the boot process. bcvk supports loading existing Secure Boot keys for libvirt VMs.
+
+### Prerequisites
+
+- `edk2-ovmf` package (provides UEFI firmware files)
+- `python3-virt-firmware` package (provides `virt-fw-vars` tool)
+- `openssl` (for certificate generation)
+
+Install on Fedora/RHEL:
+```bash
+sudo dnf install -y edk2-ovmf python3-virt-firmware openssl
+```
+
+### Using Secure Boot
+
+Enable Secure Boot with existing keys:
+
+```bash
+bcvk libvirt run --firmware uefi-secure --secure-boot-keys /path/to/keys quay.io/myimage:latest
+```
+
+This will load existing PK, KEK, and db certificates from the specified directory, create a custom OVMF_VARS template with enrolled keys, and configure the VM to use Secure Boot firmware.
+
+### Generating Keys
+
+Secure Boot keys must be generated externally:
+
+```bash
+# Generate keys in a directory
+mkdir -p ./my-secure-boot-keys
+cd ./my-secure-boot-keys
+
+# Generate Platform Key (PK)
+openssl req -newkey rsa:4096 -nodes -keyout PK.key -new -x509 -sha256 -days 3650 -subj '/CN=Platform Key/' -out PK.crt
+
+# Generate Key Exchange Key (KEK)
+openssl req -newkey rsa:4096 -nodes -keyout KEK.key -new -x509 -sha256 -days 3650 -subj '/CN=Key Exchange Key/' -out KEK.crt
+
+# Generate Signature Database key (db)
+openssl req -newkey rsa:4096 -nodes -keyout db.key -new -x509 -sha256 -days 3650 -subj '/CN=Signature Database key/' -out db.crt
+
+# Generate GUID
+uuidgen > GUID.txt
+```
+
+The Secure Boot configuration requires:
+
+- **PK (Platform Key)**: Root of trust, controls KEK updates (PK.crt)
+- **KEK (Key Exchange Key)**: Authorizes db/dbx updates (KEK.crt)
+- **db (Signature Database)**: Contains authorized signatures (db.crt)
+- **GUID**: Unique identifier for the key owner (GUID.txt)
+
+### Firmware Options
+
+bcvk provides three firmware options:
+
+- `--firmware uefi-secure` (default): UEFI with Secure Boot enabled
+- `--firmware uefi-insecure`: UEFI with Secure Boot explicitly disabled
+- `--firmware bios`: Legacy BIOS mode
+
+### Troubleshooting Secure Boot
+
+**Missing virt-fw-vars**:
+```bash
+sudo dnf install -y python3-virt-firmware
+```
+
+**Missing OVMF files**:
+```bash
+sudo dnf install -y edk2-ovmf
+```
+
+**Missing key files**: Generate keys first using the commands above.
+
+**Permission issues**: Ensure read permissions to the key directory:
+```bash
+chmod -R 644 /path/to/your/keys
+chmod 755 /path/to/your/keys
+```
+
+**Verify Secure Boot status in VM**:
+```bash
+mokutil --sb-state  # Should show "SecureBoot enabled"
+```
+
 ## Resource Management Concepts
 
 ### CPU Allocation

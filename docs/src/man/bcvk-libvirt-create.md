@@ -91,9 +91,14 @@ Create and start domains from uploaded bootc volumes
 
 **--firmware**=*FIRMWARE*
 
-    Firmware type for the VM (\"uefi\", \"uefi-secure\", or \"bios\", defaults to \"uefi\")
+    Firmware type for the VM (defaults to uefi-secure)
 
-    Default: uefi
+    Possible values:
+    - uefi-secure
+    - uefi-insecure
+    - bios
+
+    Default: uefi-secure
 
 **--disable-tpm**
 
