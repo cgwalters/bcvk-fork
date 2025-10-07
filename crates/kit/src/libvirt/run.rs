@@ -5,6 +5,7 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Parser, ValueEnum};
+use color_eyre::eyre;
 use color_eyre::{eyre::Context, Result};
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
@@ -89,7 +90,7 @@ pub struct LibvirtRunOpts {
 
     /// Directory containing secure boot keys (required for uefi-secure)
     #[clap(long)]
-    pub secure_boot_keys: Option<String>,
+    pub secure_boot_keys: Option<Utf8PathBuf>,
 }
 
 /// Execute the libvirt run command
@@ -547,25 +548,14 @@ fn create_libvirt_domain_from_disk(
         .unwrap_or(None);
 
     // Setup secure boot if requested
-    let secure_boot_config = if opts.firmware == FirmwareType::UefiSecure {
+    let secure_boot_config = if let Some(keys) = opts.secure_boot_keys.as_deref() {
         use crate::libvirt::secureboot;
 
-        // Require secure boot keys directory
-        let keys_dir = opts.secure_boot_keys.as_ref().ok_or_else(|| {
-            color_eyre::eyre::eyre!(
-                "--secure-boot-keys is required when using --firmware=uefi-secure"
-            )
-        })?;
-        let keys_dir = Utf8PathBuf::from(keys_dir);
+        eyre::ensure!(opts.firmware == FirmwareType::UefiSecure);
 
-        info!("Setting up secure boot configuration from {}", keys_dir);
-        let config =
-            secureboot::setup_secure_boot(&keys_dir).context("Failed to setup secure boot")?;
+        info!("Setting up secure boot configuration from {}", keys);
+        let config = secureboot::setup_secure_boot(&keys).context("Failed to setup secure boot")?;
         Some(config)
-    } else if opts.secure_boot_keys.is_some() {
-        return Err(color_eyre::eyre::eyre!(
-            "--secure-boot-keys can only be used with --firmware=uefi-secure"
-        ));
     } else {
         None
     };
