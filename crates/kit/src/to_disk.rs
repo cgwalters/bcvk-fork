@@ -203,7 +203,7 @@ impl ToDiskOpts {
             .as_deref()
             .map(|v| shlex::try_quote(v))
             .transpose()?
-            .map(|v| format!("RUST_LOG={v}"))
+            .map(|v| format!("--env=RUST_LOG={v}"))
             .unwrap_or_default();
 
         // Create the complete script by substituting variables directly
@@ -218,13 +218,23 @@ impl ToDiskOpts {
             echo "Source image: {SOURCE_IMGREF}"
             echo "Additional args: {BOOTC_ARGS}"
 
-            # Execute bootc installation
-            env STORAGE_OPTS=additionalimagestore=/run/virtiofs-mnt-hoststorage/ \
+            tty=
+            if test -t 0; then
+                tty=--tty
+            fi
+
+            # Execute bootc installation, having the outer podman pull from
+            # the virtiofs store on the host, as well as the inner bootc.
+            AIS=/run/virtiofs-mnt-hoststorage/
+            export STORAGE_OPTS=additionalimagestore=${AIS}
+            podman run --rm -i ${tty} --privileged --pid=host --net=none -v /sys:/sys:ro \
+                 -v /var/lib/containers:/var/lib/containers -v /dev:/dev -v ${AIS}:${AIS} --security-opt label=type:unconfined_t \
+                --env=STORAGE_OPTS \
                 {INSTALL_LOG} \
+                {SOURCE_IMGREF} \
                 bootc install to-disk \
                 --generic-image \
                 --skip-fetch-check \
-                --source-imgref {SOURCE_IMGREF} \
                 {BOOTC_ARGS} \
                 /dev/disk/by-id/virtio-output
             
