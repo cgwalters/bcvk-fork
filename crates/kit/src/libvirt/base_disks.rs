@@ -363,7 +363,7 @@ pub fn list_base_disks(connect_uri: Option<&String>) -> Result<Vec<BaseDiskInfo>
 }
 
 /// Information about a base disk
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct BaseDiskInfo {
     pub path: Utf8PathBuf,
     pub image_digest: Option<String>,

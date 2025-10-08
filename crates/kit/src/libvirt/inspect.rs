@@ -6,6 +6,8 @@
 use clap::Parser;
 use color_eyre::Result;
 
+use super::OutputFormat;
+
 /// Options for inspecting a libvirt domain
 #[derive(Debug, Parser)]
 pub struct LibvirtInspectOpts {
@@ -13,8 +15,8 @@ pub struct LibvirtInspectOpts {
     pub name: String,
 
     /// Output format
-    #[clap(long, default_value = "yaml")]
-    pub format: String,
+    #[clap(long, value_enum, default_value_t = OutputFormat::Yaml)]
+    pub format: OutputFormat,
 }
 
 /// Execute the libvirt inspect command
@@ -33,8 +35,8 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtInspectOpt
         .get_domain_info(&opts.name)
         .map_err(|_| color_eyre::eyre::eyre!("VM '{}' not found", opts.name))?;
 
-    match opts.format.as_str() {
-        "yaml" => {
+    match opts.format {
+        OutputFormat::Yaml => {
             println!("name: {}", vm.name);
             if let Some(ref image) = vm.image {
                 println!("image: {}", image);
@@ -50,17 +52,16 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtInspectOpt
                 println!("disk_path: {}", disk_path);
             }
         }
-        "json" => {
+        OutputFormat::Json => {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&vm)
                     .with_context(|| "Failed to serialize VM as JSON")?
             );
         }
-        _ => {
+        OutputFormat::Table => {
             return Err(color_eyre::eyre::eyre!(
-                "Unsupported format: {}",
-                opts.format
+                "Table format is not supported for inspect command"
             ))
         }
     }
