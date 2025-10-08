@@ -165,16 +165,26 @@ impl DiskImageMetadata {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ValidationError {
+    #[error("file is missing")]
+    MissingFile,
+    #[error("Missing extended attribute metadata")]
+    MissingXattr,
+    #[error("Hash mismatch")]
+    HashMismatch,
+}
+
 /// Check if a cached disk image can be reused by comparing cache hashes
 pub fn check_cached_disk(
     path: &Path,
     image_digest: &str,
     install_options: &InstallOptions,
     kernel_args: &[String],
-) -> Result<bool> {
+) -> Result<Result<(), ValidationError>> {
     if !path.exists() {
         tracing::debug!("Disk image {:?} does not exist", path);
-        return Ok(false);
+        return Ok(Err(ValidationError::MissingFile));
     }
 
     // Create metadata for the current request to compute expected hash
@@ -198,7 +208,7 @@ pub fn check_cached_disk(
             .to_string(),
         None => {
             tracing::debug!("No cache hash xattr found on {:?}", path);
-            return Ok(false);
+            return Ok(Err(ValidationError::MissingXattr));
         }
     };
 
@@ -209,6 +219,7 @@ pub fn check_cached_disk(
             path,
             expected_hash
         );
+        Ok(Ok(()))
     } else {
         tracing::debug!(
             "Cached disk at {:?} does not match requirements. \
@@ -217,9 +228,8 @@ pub fn check_cached_disk(
             expected_hash,
             cached_hash
         );
+        Ok(Err(ValidationError::HashMismatch))
     }
-
-    Ok(matches)
 }
 
 #[cfg(test)]
