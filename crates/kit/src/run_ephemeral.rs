@@ -281,6 +281,7 @@ pub fn run_detached(opts: RunEphemeralOpts) -> Result<String> {
     // Leak the tempdir to keep it alive for the entire container lifetime
     std::mem::forget(temp_dir);
 
+    debug!("Podman command: {:?}", cmd);
     let output = cmd.output().context("Failed to execute podman command")?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -548,18 +549,22 @@ pub(crate) fn process_disk_files(
                 };
                 (file.to_string(), name.to_string(), format)
             } else {
-                (
-                    file.to_string(),
-                    rest.to_string(),
-                    crate::to_disk::Format::Raw,
-                )
+                // Auto-detect format from file extension if not explicitly provided
+                let format = if file.ends_with(".qcow2") {
+                    crate::to_disk::Format::Qcow2
+                } else {
+                    crate::to_disk::Format::Raw
+                };
+                (file.to_string(), rest.to_string(), format)
             }
         } else {
-            (
-                disk_spec.clone(),
-                "output".to_string(),
-                crate::to_disk::Format::Raw,
-            )
+            // Auto-detect format from file extension if not explicitly provided
+            let format = if disk_spec.ends_with(".qcow2") {
+                crate::to_disk::Format::Qcow2
+            } else {
+                crate::to_disk::Format::Raw
+            };
+            (disk_spec.clone(), "output".to_string(), format)
         };
 
         let disk_path = Utf8Path::new(&disk_file);
@@ -599,6 +604,10 @@ pub(crate) fn process_disk_files(
             Utf8PathBuf::try_from(p)?
         };
 
+        debug!(
+            "Processed disk file: path={}, name={}, format={}",
+            absolute_disk_file, disk_name, format
+        );
         processed_disks.push((absolute_disk_file, disk_name, format));
     }
 
@@ -1043,21 +1052,53 @@ Options=
     // Parse disk files from environment variable
     let mut virtio_blk_devices = Vec::new();
     if let Ok(disk_env) = std::env::var("BOOTC_DISK_FILES") {
+        debug!("Processing BOOTC_DISK_FILES: {}", disk_env);
         for disk_spec in disk_env.split(',') {
-            // Parse disk_file:disk_name:format or disk_file:disk_name (defaulting to raw)
+            // Parse disk_file:disk_name:format or disk_file:disk_name (auto-detect format)
             let parts: Vec<&str> = disk_spec.splitn(3, ':').collect();
             if parts.len() >= 2 {
                 let format = if parts.len() == 3 {
                     match parts[2] {
                         "qcow2" => crate::to_disk::Format::Qcow2,
-                        _ => crate::to_disk::Format::Raw,
+                        "raw" => crate::to_disk::Format::Raw,
+                        _ => {
+                            // Auto-detect from file extension as fallback
+                            if parts[0].ends_with(".qcow2") {
+                                crate::to_disk::Format::Qcow2
+                            } else {
+                                crate::to_disk::Format::Raw
+                            }
+                        }
                     }
                 } else {
-                    crate::to_disk::Format::Raw
+                    // Auto-detect format from file extension
+                    if parts[0].ends_with(".qcow2") {
+                        crate::to_disk::Format::Qcow2
+                    } else {
+                        crate::to_disk::Format::Raw
+                    }
                 };
+
+                let disk_file = parts[0].to_string();
+                let serial = parts[1].to_string();
+
+                // Check if disk file exists and is accessible
+                if !Utf8Path::new(&disk_file).exists() {
+                    return Err(eyre!(
+                        "Disk file does not exist in bwrap namespace: {} (serial: {})",
+                        disk_file,
+                        serial
+                    ));
+                }
+
+                debug!(
+                    "Adding virtio-blk device: file={}, serial={}, format={:?}",
+                    disk_file, serial, format
+                );
+
                 virtio_blk_devices.push(crate::qemu::VirtioBlkDevice {
-                    disk_file: parts[0].to_string(),
-                    serial: parts[1].to_string(),
+                    disk_file,
+                    serial,
                     format,
                 });
             }
