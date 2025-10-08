@@ -17,6 +17,7 @@ name = "test-cleanup"
 path = "src/bin/cleanup.rs"
 
 [dependencies]
+bcvk = { path = "../kit" }
 color-eyre = { workspace = true }
 dirs = "5.0"
 tracing = { workspace = true }

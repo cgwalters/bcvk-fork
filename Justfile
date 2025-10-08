@@ -2,6 +2,9 @@
 build:
    make
 
+check:
+    cargo t --workspace --no-run
+
 # Run unit tests (excludes integration tests)
 unit *ARGS:
     #!/usr/bin/env bash

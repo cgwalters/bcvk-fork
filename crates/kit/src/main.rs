@@ -202,8 +202,10 @@ fn main() -> Result<(), Report> {
                     libvirt::inspect::run(&options, opts)?
                 }
                 libvirt::LibvirtSubcommands::Upload(opts) => libvirt::upload::run(&options, opts)?,
-                libvirt::LibvirtSubcommands::Create(opts) => libvirt::create::run(&options, opts)?,
                 libvirt::LibvirtSubcommands::Status(opts) => libvirt::status::run(opts)?,
+                libvirt::LibvirtSubcommands::BaseDisks(opts) => {
+                    libvirt::base_disks_cli::run(&options, opts)?
+                }
             }
         }
         Commands::LibvirtUploadDisk(opts) => {

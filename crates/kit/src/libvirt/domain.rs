@@ -102,12 +102,14 @@ impl DomainBuilder {
     }
 
     /// Enable VNC on specified port
+    #[allow(dead_code)]
     pub fn with_vnc(mut self, port: u16) -> Self {
         self.vnc_port = Some(port);
         self
     }
 
     /// Set kernel arguments for direct boot
+    #[allow(dead_code)]
     pub fn with_kernel_args(mut self, kernel_args: &str) -> Self {
         self.kernel_args = Some(kernel_args.to_string());
         self
@@ -292,8 +294,15 @@ impl DomainBuilder {
 
         // Disk
         if let Some(ref disk_path) = self.disk_path {
+            // Auto-detect disk format from file extension
+            let disk_type = if disk_path.ends_with(".qcow2") {
+                "qcow2"
+            } else {
+                "raw"
+            };
+
             writer.start_element("disk", &[("type", "file"), ("device", "disk")])?;
-            writer.write_empty_element("driver", &[("name", "qemu"), ("type", "raw")])?;
+            writer.write_empty_element("driver", &[("name", "qemu"), ("type", disk_type)])?;
             writer.write_empty_element("source", &[("file", disk_path)])?;
             writer.write_empty_element("target", &[("dev", "vda"), ("bus", "virtio")])?;
             writer.end_element("disk")?;

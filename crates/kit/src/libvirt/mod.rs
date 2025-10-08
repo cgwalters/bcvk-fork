@@ -4,12 +4,21 @@
 //! - `run`: Run a bootable container as a persistent VM
 //! - `list`: List bootc domains with metadata
 //! - `upload`: Upload bootc disk images to libvirt with metadata annotations
-//! - `create`: Create and start domains from uploaded volumes
 //! - `list-volumes`: List available bootc volumes with metadata
 
 use clap::Subcommand;
 
-pub mod create;
+/// Default memory allocation for libvirt VMs
+pub const LIBVIRT_DEFAULT_MEMORY: &str = "4G";
+
+/// Default vCPU count for libvirt VMs
+pub const LIBVIRT_DEFAULT_VCPUS: u32 = 2;
+
+/// Default disk size for libvirt base disks
+pub const LIBVIRT_DEFAULT_DISK_SIZE: &str = "20G";
+
+pub mod base_disks;
+pub mod base_disks_cli;
 pub mod domain;
 pub mod inspect;
 pub mod list;
@@ -80,6 +89,7 @@ pub enum LibvirtSubcommands {
     /// Upload bootc disk images to libvirt with metadata annotations
     Upload(upload::LibvirtUploadOpts),
 
-    /// Create and start domains from uploaded bootc volumes
-    Create(create::LibvirtCreateOpts),
+    /// Manage base disk images used for VM cloning
+    #[clap(name = "base-disks")]
+    BaseDisks(base_disks_cli::LibvirtBaseDisksOpts),
 }

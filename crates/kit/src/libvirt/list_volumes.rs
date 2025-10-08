@@ -295,9 +295,10 @@ impl LibvirtListVolumesOpts {
                 let source_image = volume.source_image.as_deref().unwrap_or("<no metadata>");
                 let created = volume.created.as_deref().unwrap_or("N/A");
 
+                let size = indicatif::BinaryBytes(volume.size).to_string();
                 table.add_row(vec![
                     &volume.name,
-                    &format_size(volume.size),
+                    &size,
                     &volume.format,
                     &volume.path,
                     source_image,
@@ -309,8 +310,9 @@ impl LibvirtListVolumesOpts {
 
             for volume in volumes {
                 let source_image = volume.source_image.as_deref().unwrap_or("<no metadata>");
+                let size = indicatif::BinaryBytes(volume.size).to_string();
 
-                table.add_row(vec![&volume.name, &format_size(volume.size), source_image]);
+                table.add_row(vec![&volume.name, &size, source_image]);
             }
         }
 
@@ -364,26 +366,6 @@ fn parse_virsh_size(size_str: &str) -> Option<u64> {
     };
 
     Some((number * multiplier as f64) as u64)
-}
-
-/// Format size in bytes to human-readable format
-fn format_size(bytes: u64) -> String {
-    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
-    const THRESHOLD: u64 = 1024;
-
-    if bytes < THRESHOLD {
-        return format!("{}B", bytes);
-    }
-
-    let mut size = bytes as f64;
-    let mut unit_index = 0;
-
-    while size >= THRESHOLD as f64 && unit_index < UNITS.len() - 1 {
-        size /= THRESHOLD as f64;
-        unit_index += 1;
-    }
-
-    format!("{:.1}{}", size, UNITS[unit_index])
 }
 
 /// Execute the libvirt volume listing process

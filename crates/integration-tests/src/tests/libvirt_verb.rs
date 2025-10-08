@@ -210,8 +210,8 @@ pub fn test_libvirt_run_ssh_full_workflow() {
     let _ = Command::new("virsh")
         .args(&["destroy", &domain_name])
         .output();
-    let _ = Command::new("virsh")
-        .args(&["undefine", &domain_name])
+    let _ = Command::new(&bck)
+        .args(&["libvirt", "rm", &domain_name, "--force", "--stop"])
         .output();
 
     // Create domain with SSH key generation
@@ -299,9 +299,10 @@ fn cleanup_domain(domain_name: &str) {
         .args(&["destroy", domain_name])
         .output();
 
-    // Remove domain definition
-    let cleanup_output = Command::new("virsh")
-        .args(&["undefine", domain_name])
+    // Use bcvk libvirt rm for proper cleanup
+    let bck = get_bck_command().unwrap();
+    let cleanup_output = Command::new(&bck)
+        .args(&["libvirt", "rm", domain_name, "--force", "--stop"])
         .output();
 
     if let Ok(output) = cleanup_output {
@@ -372,12 +373,35 @@ pub fn test_libvirt_vm_lifecycle() {
     let test_volume = "test-vm-lifecycle";
     let domain_name = format!("bootc-{}", test_volume);
 
+    // Guard to ensure cleanup always runs
+    struct VmCleanupGuard {
+        domain_name: String,
+        bck: String,
+    }
+    impl Drop for VmCleanupGuard {
+        fn drop(&mut self) {
+            // Try to stop the VM first
+            let _ = std::process::Command::new("virsh")
+                .args(&["destroy", &self.domain_name])
+                .output();
+            // Use bcvk libvirt rm for cleanup
+            let cleanup_output = std::process::Command::new(&self.bck)
+                .args(&["libvirt", "rm", &self.domain_name, "--force", "--stop"])
+                .output();
+            if let Ok(output) = cleanup_output {
+                if output.status.success() {
+                    println!("Cleaned up VM domain: {}", self.domain_name);
+                }
+            }
+        }
+    }
+
     // Cleanup any existing test domain
     let _ = std::process::Command::new("virsh")
         .args(&["destroy", &domain_name])
         .output();
-    let _ = std::process::Command::new("virsh")
-        .args(&["undefine", &domain_name])
+    let _ = std::process::Command::new(&bck)
+        .args(&["libvirt", "rm", &domain_name, "--force", "--stop"])
         .output();
 
     // Create a minimal test volume (skip if no bootc container available)
@@ -404,56 +428,40 @@ pub fn test_libvirt_vm_lifecycle() {
 
     println!("Created VM domain: {}", domain_name);
 
-    // Try to start the domain
-    let start_output = std::process::Command::new("virsh")
-        .args(&["start", &domain_name])
+    // Set up cleanup guard after successful creation
+    let _guard = VmCleanupGuard {
+        domain_name: domain_name.clone(),
+        bck: bck.clone(),
+    };
+
+    // Verify domain is running (libvirt run starts the domain by default)
+    let dominfo_output = std::process::Command::new("virsh")
+        .args(&["dominfo", &domain_name])
         .output()
-        .expect("Failed to run virsh start");
+        .expect("Failed to run virsh dominfo");
 
-    if start_output.status.success() {
-        println!("Successfully started VM: {}", domain_name);
+    let info = String::from_utf8_lossy(&dominfo_output.stdout);
+    assert!(info.contains("State:"), "Should show domain state");
+    assert!(
+        info.contains("running") || info.contains("idle"),
+        "Domain should be running after creation"
+    );
+    println!("Verified VM is running: {}", domain_name);
 
-        // Verify domain is running
-        let dominfo_output = std::process::Command::new("virsh")
-            .args(&["dominfo", &domain_name])
-            .output()
-            .expect("Failed to run virsh dominfo");
+    // Wait a moment for VM to initialize
+    std::thread::sleep(std::time::Duration::from_secs(5));
 
-        let info = String::from_utf8_lossy(&dominfo_output.stdout);
-        assert!(info.contains("State:"), "Should show domain state");
-
-        // Wait a moment for VM to initialize
-        std::thread::sleep(std::time::Duration::from_secs(5));
-
-        // Stop the domain
-        let stop_output = std::process::Command::new("virsh")
-            .args(&["destroy", &domain_name])
-            .output()
-            .expect("Failed to run virsh destroy");
-
-        if !stop_output.status.success() {
-            let stderr = String::from_utf8_lossy(&stop_output.stderr);
-            eprintln!("Warning: Failed to stop domain: {}", stderr);
-        } else {
-            println!("Successfully stopped VM: {}", domain_name);
-        }
-    } else {
-        let stderr = String::from_utf8_lossy(&start_output.stderr);
-        panic!("VM start failed: {}", stderr);
-    }
-
-    // Cleanup - remove the domain
-    let _ = std::process::Command::new("virsh")
+    // Stop the domain
+    let stop_output = std::process::Command::new("virsh")
         .args(&["destroy", &domain_name])
-        .output();
-    let cleanup_output = std::process::Command::new("virsh")
-        .args(&["undefine", &domain_name])
         .output()
-        .expect("Failed to cleanup domain");
+        .expect("Failed to run virsh destroy");
 
-    if cleanup_output.status.success() {
-        println!("Cleaned up VM domain: {}", domain_name);
+    if !stop_output.status.success() {
+        let stderr = String::from_utf8_lossy(&stop_output.stderr);
+        panic!("Failed to stop domain: {}", stderr);
     }
+    println!("Successfully stopped VM: {}", domain_name);
 
     println!("VM lifecycle test completed");
 }
@@ -504,8 +512,8 @@ pub fn test_libvirt_bind_storage_ro() {
     let _ = Command::new("virsh")
         .args(&["destroy", &domain_name])
         .output();
-    let _ = Command::new("virsh")
-        .args(&["undefine", &domain_name])
+    let _ = Command::new(&bck)
+        .args(&["libvirt", "rm", &domain_name, "--force", "--stop"])
         .output();
 
     // Create domain with --bind-storage-ro flag
