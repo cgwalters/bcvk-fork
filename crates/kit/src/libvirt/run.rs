@@ -562,10 +562,7 @@ mod tests {
     fn test_parse_volume_mount_nonexistent_host() {
         let result = parse_volume_mount("/nonexistent/path/that/does/not/exist:mytag");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("does not exist"));
+        assert!(result.unwrap_err().to_string().contains("does not exist"));
     }
 }
 
@@ -692,8 +689,7 @@ fn create_libvirt_domain_from_disk(
                 readonly: false,
             };
 
-            domain_builder = domain_builder
-                .with_virtiofs_filesystem(virtiofs_fs);
+            domain_builder = domain_builder.with_virtiofs_filesystem(virtiofs_fs);
         }
     }
 
