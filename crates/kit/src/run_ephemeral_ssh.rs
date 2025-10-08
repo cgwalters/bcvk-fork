@@ -62,7 +62,8 @@ pub fn wait_for_vm_ssh(
     for line in std::io::BufRead::lines(reader) {
         let line = line.context("Reading monitor output")?;
 
-        let status = serde_json::from_str::<SupervisorStatus>(&line)?;
+        let status: SupervisorStatus = serde_json::from_str(&line)
+            .with_context(|| format!("Failed to parse monitor output as JSON: {}", line))?;
         debug!("Status update: {:?}", status.state);
 
         if status.ssh_access {
