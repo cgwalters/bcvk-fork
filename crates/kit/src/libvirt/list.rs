@@ -16,6 +16,10 @@ pub struct LibvirtListOpts {
     /// Show all domains including stopped ones
     #[clap(long, short = 'a')]
     pub all: bool,
+
+    /// Filter domains by label
+    #[clap(long)]
+    pub label: Option<String>,
 }
 
 /// Execute the libvirt list command
@@ -30,7 +34,7 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtListOpts) 
         None => DomainLister::new(),
     };
 
-    let domains = if opts.all {
+    let mut domains = if opts.all {
         lister
             .list_bootc_domains()
             .with_context(|| "Failed to list bootc domains from libvirt")?
@@ -39,6 +43,11 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtListOpts) 
             .list_running_bootc_domains()
             .with_context(|| "Failed to list running bootc domains from libvirt")?
     };
+
+    // Filter by label if specified
+    if let Some(ref filter_label) = opts.label {
+        domains.retain(|d| d.labels.contains(filter_label));
+    }
 
     match opts.format.as_str() {
         "table" => {

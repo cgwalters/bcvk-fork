@@ -102,6 +102,10 @@ Run a bootable container as a persistent VM
 
     Directory containing secure boot keys (required for uefi-secure)
 
+**--label**=*LABEL*
+
+    User-defined labels for organizing VMs (comma not allowed in labels)
+
 <!-- END GENERATED OPTIONS -->
 
 # EXAMPLES

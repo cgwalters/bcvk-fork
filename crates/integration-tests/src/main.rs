@@ -6,8 +6,8 @@ use libtest_mimic::{Arguments, Trial};
 use serde_json::Value;
 use xshell::{cmd, Shell};
 
-/// Label used to identify containers created by integration tests
-pub(crate) const INTEGRATION_TEST_LABEL: &str = "bcvk.integration-test=1";
+// Re-export constants from lib for internal use
+pub(crate) use integration_tests::{INTEGRATION_TEST_LABEL, LIBVIRT_INTEGRATION_TEST_LABEL};
 
 mod tests {
     pub mod libvirt_base_disks;
@@ -203,6 +203,10 @@ fn main() {
         }),
         Trial::test("libvirt_vm_lifecycle", || {
             tests::libvirt_verb::test_libvirt_vm_lifecycle();
+            Ok(())
+        }),
+        Trial::test("libvirt_label_functionality", || {
+            tests::libvirt_verb::test_libvirt_label_functionality();
             Ok(())
         }),
         Trial::test("libvirt_error_handling", || {

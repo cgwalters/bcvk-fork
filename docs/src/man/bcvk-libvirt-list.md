@@ -23,6 +23,10 @@ List available bootc volumes with metadata
 
     Show all domains including stopped ones
 
+**--label**=*LABEL*
+
+    Filter domains by label
+
 <!-- END GENERATED OPTIONS -->
 
 # EXAMPLES

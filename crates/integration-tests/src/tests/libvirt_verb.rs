@@ -9,7 +9,7 @@
 
 use std::process::Command;
 
-use crate::{get_bck_command, get_test_image};
+use crate::{get_bck_command, get_test_image, LIBVIRT_INTEGRATION_TEST_LABEL};
 
 /// Test libvirt list functionality (lists domains)
 pub fn test_libvirt_list_functionality() {
@@ -224,6 +224,8 @@ pub fn test_libvirt_run_ssh_full_workflow() {
             "run",
             "--name",
             &domain_name,
+            "--label",
+            LIBVIRT_INTEGRATION_TEST_LABEL,
             "--filesystem",
             "ext4",
             &test_image,
@@ -416,6 +418,8 @@ pub fn test_libvirt_vm_lifecycle() {
             "ext4",
             "--name",
             &domain_name,
+            "--label",
+            LIBVIRT_INTEGRATION_TEST_LABEL,
             test_image,
         ])
         .output()
@@ -526,6 +530,8 @@ pub fn test_libvirt_bind_storage_ro() {
             "run",
             "--name",
             &domain_name,
+            "--label",
+            LIBVIRT_INTEGRATION_TEST_LABEL,
             "--bind-storage-ro",
             "--filesystem",
             "ext4",
@@ -697,6 +703,144 @@ pub fn test_libvirt_bind_storage_ro() {
     cleanup_domain(&domain_name);
 
     println!("✓ --bind-storage-ro end-to-end test passed");
+}
+
+/// Test libvirt label functionality
+pub fn test_libvirt_label_functionality() {
+    let bck = get_bck_command().unwrap();
+    let test_image = get_test_image();
+
+    // Generate unique domain name for this test
+    let domain_name = format!(
+        "test-label-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    );
+
+    println!(
+        "Testing libvirt label functionality with domain: {}",
+        domain_name
+    );
+
+    // Cleanup any existing domain with this name
+    let _ = Command::new("virsh")
+        .args(&["destroy", &domain_name])
+        .output();
+    let _ = Command::new(&bck)
+        .args(&["libvirt", "rm", &domain_name, "--force", "--stop"])
+        .output();
+
+    // Create domain with multiple labels
+    println!("Creating libvirt domain with multiple labels...");
+    let create_output = Command::new("timeout")
+        .args([
+            "300s",
+            &bck,
+            "libvirt",
+            "run",
+            "--name",
+            &domain_name,
+            "--label",
+            LIBVIRT_INTEGRATION_TEST_LABEL,
+            "--label",
+            "test-env",
+            "--label",
+            "temporary",
+            "--filesystem",
+            "ext4",
+            &test_image,
+        ])
+        .output()
+        .expect("Failed to run libvirt run with labels");
+
+    let create_stdout = String::from_utf8_lossy(&create_output.stdout);
+    let create_stderr = String::from_utf8_lossy(&create_output.stderr);
+
+    println!("Create stdout: {}", create_stdout);
+    println!("Create stderr: {}", create_stderr);
+
+    if !create_output.status.success() {
+        cleanup_domain(&domain_name);
+        panic!("Failed to create domain with labels: {}", create_stderr);
+    }
+
+    println!("Successfully created domain with labels: {}", domain_name);
+
+    // Verify labels are stored in domain XML
+    println!("Checking domain XML for labels...");
+    let dumpxml_output = Command::new("virsh")
+        .args(&["dumpxml", &domain_name])
+        .output()
+        .expect("Failed to dump domain XML");
+
+    let domain_xml = String::from_utf8_lossy(&dumpxml_output.stdout);
+
+    // Check that labels are in the XML
+    assert!(
+        domain_xml.contains("bootc:label") || domain_xml.contains("<label>"),
+        "Domain XML should contain label metadata"
+    );
+    assert!(
+        domain_xml.contains(LIBVIRT_INTEGRATION_TEST_LABEL),
+        "Domain XML should contain bcvk-integration label"
+    );
+
+    // Test filtering by label
+    println!("Testing label filtering with libvirt list...");
+    let list_output = Command::new(&bck)
+        .args([
+            "libvirt",
+            "list",
+            "--label",
+            LIBVIRT_INTEGRATION_TEST_LABEL,
+            "-a",
+        ])
+        .output()
+        .expect("Failed to run libvirt list with label filter");
+
+    let list_stdout = String::from_utf8_lossy(&list_output.stdout);
+    println!("List output: {}", list_stdout);
+
+    assert!(
+        list_output.status.success(),
+        "libvirt list with label filter should succeed"
+    );
+    assert!(
+        list_stdout.contains(&domain_name),
+        "Domain should appear in filtered list. Output: {}",
+        list_stdout
+    );
+
+    // Test filtering by a label that should match
+    let list_test_env = Command::new(&bck)
+        .args(["libvirt", "list", "--label", "test-env", "-a"])
+        .output()
+        .expect("Failed to run libvirt list with test-env label");
+
+    let list_test_env_stdout = String::from_utf8_lossy(&list_test_env.stdout);
+    assert!(
+        list_test_env_stdout.contains(&domain_name),
+        "Domain should appear when filtering by test-env label"
+    );
+
+    // Test filtering by a label that should NOT match
+    let list_nomatch = Command::new(&bck)
+        .args(["libvirt", "list", "--label", "nonexistent-label", "-a"])
+        .output()
+        .expect("Failed to run libvirt list with nonexistent label");
+
+    let list_nomatch_stdout = String::from_utf8_lossy(&list_nomatch.stdout);
+    assert!(
+        !list_nomatch_stdout.contains(&domain_name),
+        "Domain should NOT appear when filtering by nonexistent label"
+    );
+
+    // Cleanup domain
+    cleanup_domain(&domain_name);
+
+    println!("✓ Label functionality test passed");
 }
 
 /// Test error handling for invalid configurations
