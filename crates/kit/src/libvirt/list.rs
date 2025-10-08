@@ -5,13 +5,16 @@
 
 use clap::Parser;
 use color_eyre::Result;
+use comfy_table::{presets::UTF8_FULL, Table};
+
+use super::OutputFormat;
 
 /// Options for listing libvirt domains
 #[derive(Debug, Parser)]
 pub struct LibvirtListOpts {
     /// Output format
-    #[clap(long, default_value = "table")]
-    pub format: String,
+    #[clap(long, value_enum, default_value_t = OutputFormat::Table)]
+    pub format: OutputFormat,
 
     /// Show all domains including stopped ones
     #[clap(long, short = 'a')]
@@ -49,8 +52,8 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtListOpts) 
         domains.retain(|d| d.labels.contains(filter_label));
     }
 
-    match opts.format.as_str() {
-        "table" => {
+    match opts.format {
+        OutputFormat::Table => {
             if domains.is_empty() {
                 if opts.all {
                     println!("No VMs found");
@@ -63,11 +66,11 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtListOpts) 
                 }
                 return Ok(());
             }
-            println!(
-                "{:<20} {:<40} {:<12} {:<20}",
-                "NAME", "IMAGE", "STATUS", "MEMORY"
-            );
-            println!("{}", "=".repeat(92));
+
+            let mut table = Table::new();
+            table.load_preset(UTF8_FULL);
+            table.set_header(vec!["NAME", "IMAGE", "STATUS", "MEMORY"]);
+
             for domain in &domains {
                 let image = match &domain.image {
                     Some(img) => {
@@ -83,31 +86,26 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtListOpts) 
                     Some(mem) => format!("{}MB", mem),
                     None => "unknown".to_string(),
                 };
-                println!(
-                    "{:<20} {:<40} {:<12} {:<20}",
-                    domain.name,
-                    image,
-                    domain.status_string(),
-                    memory
-                );
+                table.add_row(vec![&domain.name, &image, &domain.status_string(), &memory]);
             }
+
+            println!("{}", table);
             println!(
                 "\nFound {} domain{} (source: libvirt)",
                 domains.len(),
                 if domains.len() == 1 { "" } else { "s" }
             );
         }
-        "json" => {
+        OutputFormat::Json => {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&domains)
                     .with_context(|| "Failed to serialize domains as JSON")?
             );
         }
-        _ => {
+        OutputFormat::Yaml => {
             return Err(color_eyre::eyre::eyre!(
-                "Unsupported format: {}",
-                opts.format
+                "YAML format is not supported for list command"
             ))
         }
     }

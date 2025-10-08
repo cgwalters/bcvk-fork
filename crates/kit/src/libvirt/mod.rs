@@ -8,6 +8,15 @@
 
 use clap::Subcommand;
 
+/// Output format options for libvirt commands
+#[derive(Debug, Clone, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum OutputFormat {
+    Table,
+    Json,
+    Yaml,
+}
+
 /// Default memory allocation for libvirt VMs
 pub const LIBVIRT_DEFAULT_MEMORY: &str = "4G";
 
