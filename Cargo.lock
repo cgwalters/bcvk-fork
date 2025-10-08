@@ -1305,6 +1305,7 @@ dependencies = [
 name = "integration-tests"
 version = "0.1.0"
 dependencies = [
+ "bcvk",
  "camino",
  "cfg-if",
  "color-eyre",

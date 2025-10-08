@@ -10,6 +10,7 @@ use xshell::{cmd, Shell};
 pub(crate) const INTEGRATION_TEST_LABEL: &str = "bcvk.integration-test=1";
 
 mod tests {
+    pub mod libvirt_base_disks;
     pub mod libvirt_upload_disk;
     pub mod libvirt_verb;
     pub mod mount_feature;
@@ -210,6 +211,22 @@ fn main() {
         }),
         Trial::test("libvirt_bind_storage_ro", || {
             tests::libvirt_verb::test_libvirt_bind_storage_ro();
+            Ok(())
+        }),
+        Trial::test("libvirt_base_disk_creation_and_reuse", || {
+            tests::libvirt_base_disks::test_base_disk_creation_and_reuse();
+            Ok(())
+        }),
+        Trial::test("libvirt_base_disks_list_command", || {
+            tests::libvirt_base_disks::test_base_disks_list_command();
+            Ok(())
+        }),
+        Trial::test("libvirt_base_disks_prune_dry_run", || {
+            tests::libvirt_base_disks::test_base_disks_prune_dry_run();
+            Ok(())
+        }),
+        Trial::test("libvirt_vm_disk_references_base", || {
+            tests::libvirt_base_disks::test_vm_disk_references_base();
             Ok(())
         }),
     ];

@@ -7,9 +7,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Parser, ValueEnum};
 use color_eyre::eyre;
 use color_eyre::{eyre::Context, Result};
-use std::collections::hash_map::DefaultHasher;
 use std::fs;
-use std::hash::{Hash, Hasher};
 use tracing::{debug, info};
 
 use crate::common_opts::MemoryOpts;
@@ -95,10 +93,7 @@ pub struct LibvirtRunOpts {
 
 /// Execute the libvirt run command
 pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -> Result<()> {
-    use crate::cache_metadata;
     use crate::images;
-    use crate::run_ephemeral::CommonVmOpts;
-    use crate::to_disk::{ToDiskAdditionalOpts, ToDiskOpts};
 
     let connect_uri = global_opts.connect.as_ref();
     let lister = match connect_uri {
@@ -130,59 +125,30 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
     let image_digest = inspect.digest.to_string();
     debug!("Image digest: {}", image_digest);
 
-    // Try to find a cached disk image
-    let disk_path = find_or_create_cached_disk(
-        &vm_name,
+    // Phase 1: Find or create a base disk image
+    let base_disk_path = crate::libvirt::base_disks::find_or_create_base_disk(
         &opts.image,
         &image_digest,
         &opts.install,
         &[], // kernel_args
         connect_uri,
     )
-    .with_context(|| "Failed to find or create disk path")?;
+    .with_context(|| "Failed to find or create base disk")?;
 
-    // Check if we can reuse an existing disk image
-    let cached = cache_metadata::check_cached_disk(
-        disk_path.as_std_path(),
-        &image_digest,
-        &opts.install,
-        &[], // kernel_args
-    )?;
+    println!("Using base disk image: {}", base_disk_path);
 
-    if cached {
-        println!("🎯 Reusing cached disk image at: {}", disk_path);
-    } else {
-        // Phase 1: Create bootable disk image using to_disk
-        println!("📀 Creating bootable disk image...");
+    // Phase 2: Clone the base disk to create a VM-specific disk
+    let disk_path =
+        crate::libvirt::base_disks::clone_from_base(&base_disk_path, &vm_name, connect_uri)
+            .with_context(|| "Failed to clone VM disk from base")?;
 
-        let to_disk_opts = ToDiskOpts {
-            source_image: opts.image.clone(),
-            target_disk: disk_path.clone(),
-            install: opts.install.clone(),
-            additional: ToDiskAdditionalOpts {
-                disk_size: Some(opts.disk_size.clone()),
-                common: CommonVmOpts {
-                    memory: opts.memory.clone(),
-                    vcpus: Some(opts.cpus),
-                    ssh_keygen: true, // Enable SSH key generation
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-        };
+    println!("Created VM disk: {}", disk_path);
 
-        // Run the disk creation
-        crate::to_disk::run(to_disk_opts)
-            .with_context(|| "Failed to create bootable disk image")?;
-
-        println!("Disk image created at: {}", disk_path);
-    }
-
-    // Phase 2: Create libvirt domain
+    // Phase 3: Create libvirt domain
     println!("Creating libvirt domain...");
 
     // Create the domain directly (simpler than using libvirt/create for files)
-    create_libvirt_domain_from_disk(&vm_name, &disk_path, &opts, global_opts)
+    create_libvirt_domain_from_disk(&vm_name, &disk_path, &image_digest, &opts, global_opts)
         .with_context(|| "Failed to create libvirt domain")?;
 
     // VM is now managed by libvirt, no need to track separately
@@ -212,7 +178,7 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
 }
 
 /// Get the path of the default libvirt storage pool
-fn get_libvirt_storage_pool_path(connect_uri: Option<&String>) -> Result<Utf8PathBuf> {
+pub fn get_libvirt_storage_pool_path(connect_uri: Option<&String>) -> Result<Utf8PathBuf> {
     // If a specific connection URI is provided, use it
     if let Some(uri) = connect_uri {
         let mut cmd = crate::hostexec::command("virsh", None)?;
@@ -315,127 +281,29 @@ fn generate_unique_vm_name(image: &str, existing_domains: &[String]) -> String {
     candidate
 }
 
-/// Find a cached disk or create a new disk path for a VM
-fn find_or_create_cached_disk(
-    vm_name: &str,
-    source_image: &str,
-    image_digest: &str,
-    install_options: &InstallOptions,
-    kernel_args: &[String],
-    connect_uri: Option<&String>,
-) -> Result<Utf8PathBuf> {
-    use crate::cache_metadata;
+/// List all volumes in the default storage pool
+pub fn list_storage_pool_volumes(connect_uri: Option<&String>) -> Result<Vec<Utf8PathBuf>> {
+    // Get the storage pool path from XML
+    let pool_path = get_libvirt_storage_pool_path(connect_uri)?;
 
-    // Query libvirt for the default storage pool path
-    let base_dir = get_libvirt_storage_pool_path(connect_uri).unwrap_or_else(|_| {
-        // Fallback to standard paths if we can't query libvirt
-        if let Ok(home) = std::env::var("HOME") {
-            Utf8PathBuf::from(home).join(".local/share/libvirt/images")
-        } else {
-            Utf8PathBuf::from("/var/lib/libvirt/images")
-        }
-    });
+    debug!("Scanning storage pool directory: {:?}", pool_path);
 
-    // Ensure the directory exists
-    fs::create_dir_all(base_dir.as_std_path())
-        .with_context(|| format!("Failed to create directory: {:?}", base_dir))?;
+    let mut volumes = Vec::new();
 
-    // First, try to find an existing disk with matching metadata
-    debug!("Searching for cached disk images in {:?}", base_dir);
-
-    // Look for existing disk images with the same image hash pattern
-    let mut hasher = DefaultHasher::new();
-    source_image.hash(&mut hasher);
-    let image_hash = hasher.finish();
-    let hash_prefix = format!("{:x}", image_hash)
-        .chars()
-        .take(8)
-        .collect::<String>();
-
-    // Check existing files with matching pattern
-    if let Ok(entries) = fs::read_dir(&base_dir) {
+    // Read directory and collect volume files
+    if let Ok(entries) = fs::read_dir(&pool_path) {
         for entry in entries.flatten() {
-            if let Ok(file_name) = entry.file_name().into_string() {
-                // Check if this file matches our naming pattern
-                if file_name.starts_with(&format!("{}-{}", vm_name, hash_prefix))
-                    && file_name.ends_with(".raw")
-                {
-                    let path = base_dir.join(&file_name);
-                    debug!("Checking potential cached disk: {:?}", path);
-
-                    // Check if this disk has matching metadata
-                    if cache_metadata::check_cached_disk(
-                        path.as_std_path(),
-                        image_digest,
-                        install_options,
-                        kernel_args,
-                    )? {
-                        info!("Found matching cached disk image: {:?}", path);
-                        return Ok(path);
-                    }
+            if let Ok(path) = entry.path().into_os_string().into_string() {
+                // Filter for disk image files
+                if path.ends_with(".raw") || path.ends_with(".qcow2") {
+                    volumes.push(Utf8PathBuf::from(path));
                 }
             }
         }
     }
 
-    debug!("No matching cached disk found, will create new one");
-
-    // If no cached disk found, create a new path
-    create_disk_path(vm_name, source_image, connect_uri)
-}
-
-/// Create disk path for a VM using image hash as suffix
-fn create_disk_path(
-    vm_name: &str,
-    source_image: &str,
-    connect_uri: Option<&String>,
-) -> Result<Utf8PathBuf> {
-    // Query libvirt for the default storage pool path
-    let base_dir = get_libvirt_storage_pool_path(connect_uri).unwrap_or_else(|_| {
-        // Fallback to standard paths if we can't query libvirt
-        if let Ok(home) = std::env::var("HOME") {
-            Utf8PathBuf::from(home).join(".local/share/libvirt/images")
-        } else {
-            Utf8PathBuf::from("/var/lib/libvirt/images")
-        }
-    });
-
-    // Ensure the directory exists
-    fs::create_dir_all(base_dir.as_std_path())
-        .with_context(|| format!("Failed to create directory: {:?}", base_dir))?;
-
-    // Generate a hash of the source image for uniqueness
-    let mut hasher = DefaultHasher::new();
-    source_image.hash(&mut hasher);
-    let image_hash = hasher.finish();
-    let hash_prefix = format!("{:x}", image_hash)
-        .chars()
-        .take(8)
-        .collect::<String>();
-
-    // Try to find a unique filename
-    let mut counter = 0;
-    loop {
-        let disk_name = if counter == 0 {
-            format!("{}-{}.raw", vm_name, hash_prefix)
-        } else {
-            format!("{}-{}-{}.raw", vm_name, hash_prefix, counter)
-        };
-
-        let disk_path = base_dir.join(&disk_name);
-
-        // Check if file exists
-        if !disk_path.exists() {
-            return Ok(disk_path);
-        }
-
-        counter += 1;
-        if counter > 100 {
-            return Err(color_eyre::eyre::eyre!(
-                "Could not create unique disk path after 100 attempts"
-            ));
-        }
-    }
+    debug!("Found {} volumes in storage pool", volumes.len());
+    Ok(volumes)
 }
 
 /// Find an available SSH port for port forwarding using random allocation
@@ -493,6 +361,7 @@ fn check_libvirt_readonly_support() -> Result<()> {
 fn create_libvirt_domain_from_disk(
     domain_name: &str,
     disk_path: &Utf8Path,
+    image_digest: &str,
     opts: &LibvirtRunOpts,
     global_opts: &crate::libvirt::LibvirtOptions,
 ) -> Result<()> {
@@ -540,13 +409,6 @@ fn create_libvirt_domain_from_disk(
 
     let memory = parse_memory_to_mb(&opts.memory.memory)?;
 
-    // Get container image digest from disk for XML metadata visibility
-    let container_image_digest =
-        crate::cache_metadata::DiskImageMetadata::read_image_digest_from_path(
-            disk_path.as_std_path(),
-        )
-        .unwrap_or(None);
-
     // Setup secure boot if requested
     let secure_boot_config = if let Some(keys) = opts.secure_boot_keys.as_deref() {
         use crate::libvirt::secureboot;
@@ -583,12 +445,8 @@ fn create_libvirt_domain_from_disk(
         .with_metadata("bootc:network", &opts.network)
         .with_metadata("bootc:ssh-generated", "true")
         .with_metadata("bootc:ssh-private-key-base64", &private_key_base64)
-        .with_metadata("bootc:ssh-port", &ssh_port.to_string());
-
-    // Add container image digest to XML for visibility if available
-    if let Some(digest) = &container_image_digest {
-        domain_builder = domain_builder.with_metadata("bootc:image-digest", digest);
-    }
+        .with_metadata("bootc:ssh-port", &ssh_port.to_string())
+        .with_metadata("bootc:image-digest", image_digest);
 
     // Add secure boot configuration if enabled
     if let Some(ref sb_config) = secure_boot_config {
