@@ -688,7 +688,9 @@ fn spawn(
         _ => {
             // Redirect stdout/stderr for non-console modes
             if !config.enable_console {
-                cmd.stdout(Stdio::null()).stderr(Stdio::null());
+                // In non-console mode, redirect stderr to inherited (so we can see QEMU errors)
+                // but redirect stdout to null (to avoid noise)
+                cmd.stdout(Stdio::null()).stderr(Stdio::inherit());
             }
         }
     }
