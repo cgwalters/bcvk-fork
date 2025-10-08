@@ -1,4 +1,5 @@
 use camino::Utf8Path;
+use std::process::Output;
 
 use color_eyre::eyre::{eyre, Context};
 use color_eyre::Result;
@@ -61,6 +62,58 @@ pub(crate) fn get_alternative_test_image() -> String {
     } else {
         "quay.io/centos-bootc/centos-bootc:stream9".to_string()
     }
+}
+
+/// Captured output from a command with decoded stdout/stderr strings
+pub(crate) struct CapturedOutput {
+    pub output: Output,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+impl CapturedOutput {
+    /// Create from a raw Output
+    pub fn new(output: Output) -> Self {
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        Self {
+            output,
+            stdout,
+            stderr,
+        }
+    }
+
+    /// Assert that the command succeeded, printing debug info on failure
+    pub fn assert_success(&self, context: &str) {
+        assert!(
+            self.output.status.success(),
+            "{} failed: {}",
+            context,
+            self.stderr
+        );
+    }
+
+    /// Get the exit code
+    pub fn exit_code(&self) -> Option<i32> {
+        self.output.status.code()
+    }
+
+    /// Check if the command succeeded
+    pub fn success(&self) -> bool {
+        self.output.status.success()
+    }
+}
+
+/// Run a command, capturing output
+pub(crate) fn run_command(program: &str, args: &[&str]) -> std::io::Result<CapturedOutput> {
+    let output = std::process::Command::new(program).args(args).output()?;
+    Ok(CapturedOutput::new(output))
+}
+
+/// Run the bcvk command, capturing output
+pub(crate) fn run_bcvk(args: &[&str]) -> std::io::Result<CapturedOutput> {
+    let bck = get_bck_command().expect("Failed to get bcvk command");
+    run_command(&bck, args)
 }
 
 fn test_images_list() -> Result<()> {
