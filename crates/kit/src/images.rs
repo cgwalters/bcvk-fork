@@ -69,7 +69,7 @@ impl ImagesOpts {
                             .map(|dt| format_relative_time(dt))
                             .unwrap_or_else(|| "N/A".to_string());
 
-                        let size = format_size(image.size);
+                        let size = indicatif::BinaryBytes(image.size).to_string();
 
                         table.add_row(vec![repository, tag, id.to_string(), created, size]);
                     }
@@ -114,24 +114,6 @@ pub struct ImageInspect {
 
     /// Image creation timestamp
     pub created: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-/// Format bytes into human-readable size string.
-fn format_size(bytes: u64) -> String {
-    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
-    let mut size = bytes as f64;
-    let mut unit_idx = 0;
-
-    while size >= 1024.0 && unit_idx < UNITS.len() - 1 {
-        size /= 1024.0;
-        unit_idx += 1;
-    }
-
-    if unit_idx == 0 {
-        format!("{} {}", size as u64, UNITS[unit_idx])
-    } else {
-        format!("{:.1} {}", size, UNITS[unit_idx])
-    }
 }
 
 /// Format a datetime as relative time (e.g., "2 hours ago", "3 days ago").
