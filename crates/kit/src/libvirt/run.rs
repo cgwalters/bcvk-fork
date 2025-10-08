@@ -89,11 +89,33 @@ pub struct LibvirtRunOpts {
     /// Directory containing secure boot keys (required for uefi-secure)
     #[clap(long)]
     pub secure_boot_keys: Option<Utf8PathBuf>,
+
+    /// User-defined labels for organizing VMs (comma not allowed in labels)
+    #[clap(long)]
+    pub label: Vec<String>,
+}
+
+impl LibvirtRunOpts {
+    /// Validate that labels don't contain commas
+    fn validate_labels(&self) -> Result<()> {
+        for label in &self.label {
+            if label.contains(',') {
+                return Err(eyre::eyre!(
+                    "Label '{}' contains comma which is not allowed",
+                    label
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Execute the libvirt run command
 pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -> Result<()> {
     use crate::images;
+
+    // Validate labels don't contain commas
+    opts.validate_labels()?;
 
     let connect_uri = global_opts.connect.as_ref();
     let lister = match connect_uri {
@@ -656,6 +678,12 @@ fn create_libvirt_domain_from_disk(
         .with_metadata("bootc:ssh-private-key-base64", &private_key_base64)
         .with_metadata("bootc:ssh-port", &ssh_port.to_string())
         .with_metadata("bootc:image-digest", image_digest);
+
+    // Add labels if specified
+    if !opts.label.is_empty() {
+        let labels = opts.label.join(",");
+        domain_builder = domain_builder.with_metadata("bootc:label", &labels);
+    }
 
     // Add secure boot configuration if enabled
     if let Some(ref sb_config) = secure_boot_config {

@@ -22,10 +22,12 @@ pub struct PodmanBootcDomain {
     pub created: Option<SystemTime>,
     /// Memory allocation in MB
     pub memory_mb: Option<u32>,
-    /// Number of virtual CPUs  
+    /// Number of virtual CPUs
     pub vcpus: Option<u32>,
     /// Disk path
     pub disk_path: Option<String>,
+    /// User-defined labels for organizing domains
+    pub labels: Vec<String>,
 }
 
 impl PodmanBootcDomain {
@@ -176,6 +178,19 @@ impl DomainLister {
             .or_else(|| dom.find("created"))
             .map(|node| node.text_content().to_string());
 
+        // Extract labels (comma-separated)
+        let labels = dom
+            .find("bootc:label")
+            .or_else(|| dom.find("label"))
+            .map(|node| {
+                node.text_content()
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
         // Extract memory and vcpu from domain XML
         let memory_mb = dom.find("memory").and_then(|node| {
             // Memory might have unit attribute, but we'll try to parse the value
@@ -195,6 +210,7 @@ impl DomainLister {
             memory_mb,
             vcpus,
             disk_path,
+            labels,
         }))
     }
 
@@ -223,6 +239,10 @@ impl DomainLister {
             memory_mb: metadata.as_ref().and_then(|m| m.memory_mb),
             vcpus: metadata.as_ref().and_then(|m| m.vcpus),
             disk_path: metadata.as_ref().and_then(|m| m.disk_path.clone()),
+            labels: metadata
+                .as_ref()
+                .map(|m| m.labels.clone())
+                .unwrap_or_default(),
         })
     }
 
@@ -284,6 +304,7 @@ struct PodmanBootcDomainMetadata {
     memory_mb: Option<u32>,
     vcpus: Option<u32>,
     disk_path: Option<String>,
+    labels: Vec<String>,
 }
 
 /// Extract disk path from domain XML using DOM parser
@@ -384,6 +405,7 @@ mod tests {
             memory_mb: None,
             vcpus: None,
             disk_path: None,
+            labels: vec![],
         };
 
         assert!(domain.is_running());
@@ -398,6 +420,7 @@ mod tests {
             memory_mb: None,
             vcpus: None,
             disk_path: None,
+            labels: vec![],
         };
 
         assert!(!stopped_domain.is_running());

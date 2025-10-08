@@ -24,6 +24,7 @@ pub mod inspect;
 pub mod list;
 pub mod list_volumes;
 pub mod rm;
+pub mod rm_all;
 pub mod run;
 pub mod secureboot;
 pub mod ssh;
@@ -79,6 +80,10 @@ pub enum LibvirtSubcommands {
     /// Remove a libvirt domain and its resources
     #[clap(name = "rm")]
     Remove(rm::LibvirtRmOpts),
+
+    /// Remove multiple libvirt domains and their resources
+    #[clap(name = "rm-all")]
+    RemoveAll(rm_all::LibvirtRmAllOpts),
 
     /// Show detailed information about a libvirt domain
     Inspect(inspect::LibvirtInspectOpts),

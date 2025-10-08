@@ -199,6 +199,9 @@ fn main() -> Result<(), Report> {
                 libvirt::LibvirtSubcommands::Stop(opts) => libvirt::stop::run(&options, opts)?,
                 libvirt::LibvirtSubcommands::Start(opts) => libvirt::start::run(&options, opts)?,
                 libvirt::LibvirtSubcommands::Remove(opts) => libvirt::rm::run(&options, opts)?,
+                libvirt::LibvirtSubcommands::RemoveAll(opts) => {
+                    libvirt::rm_all::run(&options, opts)?
+                }
                 libvirt::LibvirtSubcommands::Inspect(opts) => {
                     libvirt::inspect::run(&options, opts)?
                 }
