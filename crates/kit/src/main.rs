@@ -23,6 +23,7 @@ mod libvirt_upload_disk;
 mod podman;
 #[allow(dead_code)]
 mod qemu;
+mod qemu_img;
 mod run_ephemeral;
 mod run_ephemeral_ssh;
 mod ssh;

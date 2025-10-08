@@ -247,27 +247,8 @@ pub fn clone_from_base(
     );
 
     // Get the virtual size of the base disk to use for the new volume
-    let qemu_img_output = std::process::Command::new("qemu-img")
-        .args(&["info", "--output=json", base_disk_path.as_str()])
-        .output()
-        .with_context(|| format!("Failed to get base disk info: {:?}", base_disk_path))?;
-
-    if !qemu_img_output.status.success() {
-        let stderr = String::from_utf8(qemu_img_output.stderr)
-            .with_context(|| "Invalid UTF-8 in qemu-img stderr")?;
-        return Err(color_eyre::eyre::eyre!(
-            "Failed to query base disk size: {}",
-            stderr
-        ));
-    }
-
-    // Parse JSON directly from bytes
-    let info: serde_json::Value = serde_json::from_slice(&qemu_img_output.stdout)
-        .with_context(|| "Failed to parse qemu-img info JSON")?;
-
-    let virtual_size = info["virtual-size"]
-        .as_u64()
-        .ok_or_else(|| color_eyre::eyre::eyre!("Missing virtual-size in qemu-img output"))?;
+    let info = crate::qemu_img::info(base_disk_path)?;
+    let virtual_size = info.virtual_size;
 
     // Create volume with backing file using vol-create-as
     // This creates a qcow2 image with the base disk as backing file (proper CoW)
@@ -448,33 +429,27 @@ fn count_base_disk_references(base_disk: &Utf8Path, vm_disks: &[&Utf8PathBuf]) -
 
     for vm_disk in vm_disks {
         // Use qemu-img info with --force-share to allow reading even if disk is locked by a running VM
-        let output = std::process::Command::new("qemu-img")
-            .args(&["info", "--force-share", "--output=json", vm_disk.as_str()])
-            .output()
-            .with_context(|| format!("Failed to run qemu-img info on {:?}", vm_disk))?;
-
-        if !output.status.success() {
-            // If we can't read the disk, skip it for counting purposes
-            // (We're conservative in check_base_disk_referenced but here we just want a count)
-            debug!(
-                "Warning: Could not read disk info for {:?}, skipping for reference count",
-                vm_disk
-            );
-            continue;
-        }
-
-        // Parse JSON directly from bytes
-        let info: serde_json::Value = serde_json::from_slice(&output.stdout)
-            .with_context(|| format!("Failed to parse qemu-img JSON output for {:?}", vm_disk))?;
+        let info = match crate::qemu_img::info(vm_disk) {
+            Ok(info) => info,
+            Err(_) => {
+                // If we can't read the disk, skip it for counting purposes
+                // (We're conservative in check_base_disk_referenced but here we just want a count)
+                debug!(
+                    "Warning: Could not read disk info for {:?}, skipping for reference count",
+                    vm_disk
+                );
+                continue;
+            }
+        };
 
         // Check both "backing-filename" and "full-backing-filename" fields
-        if let Some(backing_file) = info["backing-filename"].as_str() {
+        if let Some(backing_file) = &info.backing_filename {
             if backing_file.contains(base_disk_name) {
                 count += 1;
                 continue;
             }
         }
-        if let Some(backing_file) = info["full-backing-filename"].as_str() {
+        if let Some(backing_file) = &info.full_backing_filename {
             if backing_file.contains(base_disk_name) {
                 count += 1;
             }
@@ -490,29 +465,21 @@ fn check_base_disk_referenced(base_disk: &Utf8Path, vm_disks: &[&Utf8PathBuf]) -
 
     for vm_disk in vm_disks {
         // Use qemu-img info with --force-share to allow reading even if disk is locked by a running VM
-        let output = std::process::Command::new("qemu-img")
-            .args(&["info", "--force-share", "--output=json", vm_disk.as_str()])
-            .output()
-            .with_context(|| format!("Failed to run qemu-img info on {:?}", vm_disk))?;
-
-        if !output.status.success() {
-            // If we can't read the disk info, be conservative and assume it DOES reference this base
-            // This prevents accidentally pruning base disks that are in use
-            let stderr = String::from_utf8(output.stderr)
-                .with_context(|| format!("Invalid UTF-8 in qemu-img stderr for {:?}", vm_disk))?;
-            debug!(
-                "Warning: Could not read disk info for {:?}, conservatively assuming it references base disk: {}",
-                vm_disk, stderr
-            );
-            return Ok(true);
-        }
-
-        // Parse JSON directly from bytes
-        let info: serde_json::Value = serde_json::from_slice(&output.stdout)
-            .with_context(|| format!("Failed to parse qemu-img JSON output for {:?}", vm_disk))?;
+        let info = match crate::qemu_img::info(vm_disk) {
+            Ok(info) => info,
+            Err(e) => {
+                // If we can't read the disk info, be conservative and assume it DOES reference this base
+                // This prevents accidentally pruning base disks that are in use
+                debug!(
+                    "Warning: Could not read disk info for {:?}, conservatively assuming it references base disk: {}",
+                    vm_disk, e
+                );
+                return Ok(true);
+            }
+        };
 
         // Check both "backing-filename" and "full-backing-filename" fields
-        if let Some(backing_file) = info["backing-filename"].as_str() {
+        if let Some(backing_file) = &info.backing_filename {
             if backing_file.contains(base_disk_name) {
                 debug!(
                     "Found backing file reference: {:?} -> {:?}",
@@ -521,7 +488,7 @@ fn check_base_disk_referenced(base_disk: &Utf8Path, vm_disks: &[&Utf8PathBuf]) -
                 return Ok(true);
             }
         }
-        if let Some(backing_file) = info["full-backing-filename"].as_str() {
+        if let Some(backing_file) = &info.full_backing_filename {
             if backing_file.contains(base_disk_name) {
                 debug!(
                     "Found full backing file reference: {:?} -> {:?}",
