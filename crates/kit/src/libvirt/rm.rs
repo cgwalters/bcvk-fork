@@ -97,11 +97,11 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRmOpts) ->
         }
     }
 
-    // Remove libvirt domain with nvram
+    // Remove libvirt domain with nvram and storage
     println!("  Removing libvirt domain...");
     let output = global_opts
         .virsh_command()
-        .args(&["undefine", &opts.name, "--nvram"])
+        .args(&["undefine", &opts.name, "--nvram", "--remove-all-storage"])
         .output()
         .with_context(|| "Failed to undefine libvirt domain")?;
 
