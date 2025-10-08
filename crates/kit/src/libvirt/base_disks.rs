@@ -7,7 +7,8 @@
 use crate::cache_metadata::DiskImageMetadata;
 use crate::install_options::InstallOptions;
 use camino::{Utf8Path, Utf8PathBuf};
-use color_eyre::{eyre::Context, Result};
+use color_eyre::eyre::{eyre, Context};
+use color_eyre::Result;
 use std::fs;
 use tracing::{debug, info};
 
@@ -45,7 +46,9 @@ pub fn find_or_create_base_disk(
             image_digest,
             install_options,
             kernel_args,
-        )? {
+        )?
+        .is_ok()
+        {
             info!("Found cached base disk: {:?}", base_disk_path);
             return Ok(base_disk_path);
         } else {
@@ -130,10 +133,11 @@ fn create_base_disk(
         image_digest,
         install_options,
         kernel_args,
-    );
+    )
+    .context("Querying cached disk")?;
 
     match metadata_valid {
-        Ok(true) => {
+        Ok(()) => {
             // All validations passed - move to final location
             if let Err(e) = fs::rename(&temp_disk_path, base_disk_path) {
                 cleanup_temp_disk();
@@ -166,15 +170,9 @@ fn create_base_disk(
             );
             Ok(())
         }
-        Ok(false) => {
-            cleanup_temp_disk();
-            Err(color_eyre::eyre::eyre!(
-                "Base disk created but metadata verification failed"
-            ))
-        }
         Err(e) => {
             cleanup_temp_disk();
-            Err(e).with_context(|| "Failed to check disk metadata")
+            Err(eyre!("Generated disk metadata validation failed: {e}"))
         }
     }
 }

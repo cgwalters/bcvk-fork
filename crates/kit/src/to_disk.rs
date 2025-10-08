@@ -293,24 +293,26 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
         let image_digest = inspect.digest.to_string();
 
         // Check if cached disk matches our requirements
-        let matches = crate::cache_metadata::check_cached_disk(
+        match crate::cache_metadata::check_cached_disk(
             opts.target_disk.as_std_path(),
             &image_digest,
             &opts.install,
             &opts.additional.common.kernel_args,
-        )?;
-
-        if matches {
-            println!(
-                "Reusing existing cached disk image (digest {image_digest}) at: {}",
-                opts.target_disk
-            );
-            return Ok(());
-        } else {
-            debug!("Existing disk does not match requirements, recreating");
-            // Remove the existing disk so we can recreate it
-            std::fs::remove_file(&opts.target_disk)
-                .with_context(|| format!("Failed to remove existing disk {}", opts.target_disk))?;
+        )? {
+            Ok(()) => {
+                println!(
+                    "Reusing existing cached disk image (digest {image_digest}) at: {}",
+                    opts.target_disk
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                debug!("Existing disk does not match requirements, recreating: {e}");
+                // Remove the existing disk so we can recreate it
+                std::fs::remove_file(&opts.target_disk).with_context(|| {
+                    format!("Failed to remove existing disk {}", opts.target_disk)
+                })?;
+            }
         }
     }
 
