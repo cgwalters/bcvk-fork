@@ -60,6 +60,8 @@ pub fn find_or_create_base_disk(
     }
 
     // Base disk doesn't exist or was stale, create it
+    // Multiple concurrent processes may race to create this, but each uses
+    // a unique temp file, so they won't conflict
     info!("Creating base disk: {:?}", base_disk_path);
     create_base_disk(
         &base_disk_path,
@@ -85,16 +87,23 @@ fn create_base_disk(
     use crate::run_ephemeral::CommonVmOpts;
     use crate::to_disk::{Format, ToDiskAdditionalOpts, ToDiskOpts};
 
-    // Use a temporary location during installation to avoid caching incomplete disks
-    let temp_disk_path = base_disk_path.with_extension("qcow2.tmp");
+    // Use a unique temporary file to avoid conflicts when multiple processes
+    // race to create the same base disk
+    let temp_file = tempfile::Builder::new()
+        .prefix(&format!("{}.", base_disk_path.file_stem().unwrap()))
+        .suffix(".tmp.qcow2")
+        .tempfile_in(base_disk_path.parent().unwrap())
+        .with_context(|| {
+            format!(
+                "Failed to create temp file in {:?}",
+                base_disk_path.parent()
+            )
+        })?;
 
-    // Helper to cleanup temp disk on error
-    let cleanup_temp_disk = || {
-        if temp_disk_path.exists() {
-            debug!("Cleaning up temporary base disk: {:?}", temp_disk_path);
-            let _ = fs::remove_file(&temp_disk_path);
-        }
-    };
+    let temp_disk_path = Utf8PathBuf::from(temp_file.path().to_str().unwrap());
+
+    // Keep the temp file open so it gets cleaned up automatically if we error out
+    // We'll persist it manually on success
 
     // Create the disk using to_disk at temporary location
     let to_disk_opts = ToDiskOpts {
@@ -120,12 +129,9 @@ fn create_base_disk(
     };
 
     // Run bootc install - if it succeeds, the disk is valid
-    if let Err(e) = crate::to_disk::run(to_disk_opts) {
-        cleanup_temp_disk();
-        return Err(e).with_context(|| {
-            format!("Failed to install bootc to base disk: {:?}", temp_disk_path)
-        });
-    }
+    // On error, temp_file is automatically cleaned up when dropped
+    crate::to_disk::run(to_disk_opts)
+        .with_context(|| format!("Failed to install bootc to base disk: {:?}", temp_disk_path))?;
 
     // If we got here, bootc install succeeded - verify metadata was written
     let metadata_valid = crate::cache_metadata::check_cached_disk(
@@ -138,15 +144,25 @@ fn create_base_disk(
 
     match metadata_valid {
         Ok(()) => {
-            // All validations passed - move to final location
-            if let Err(e) = fs::rename(&temp_disk_path, base_disk_path) {
-                cleanup_temp_disk();
-                return Err(e).with_context(|| {
-                    format!(
-                        "Failed to move validated base disk from {:?} to {:?}",
-                        temp_disk_path, base_disk_path
-                    )
-                });
+            // All validations passed - persist temp file to final location
+            // If another concurrent process already created the file, that's fine
+            match temp_file.persist(base_disk_path) {
+                Ok(_) => {
+                    debug!("Successfully created base disk: {:?}", base_disk_path);
+                }
+                Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // Another process won the race and created the base disk
+                    debug!(
+                        "Base disk already created by another process: {:?}",
+                        base_disk_path
+                    );
+                    // temp file is cleaned up when e is dropped
+                }
+                Err(e) => {
+                    return Err(e.error).with_context(|| {
+                        format!("Failed to persist base disk to {:?}", base_disk_path)
+                    });
+                }
             }
 
             // Refresh libvirt storage pool so the new disk is visible to virsh
@@ -171,7 +187,7 @@ fn create_base_disk(
             Ok(())
         }
         Err(e) => {
-            cleanup_temp_disk();
+            // temp_file will be automatically cleaned up when dropped
             Err(eyre!("Generated disk metadata validation failed: {e}"))
         }
     }
