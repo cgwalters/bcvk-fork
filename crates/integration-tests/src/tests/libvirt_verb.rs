@@ -15,14 +15,6 @@ use crate::{get_bck_command, get_test_image};
 pub fn test_libvirt_list_functionality() {
     let bck = get_bck_command().unwrap();
 
-    // Check if virsh is available
-    let virsh_check = Command::new("which").arg("virsh").output();
-
-    if virsh_check.is_err() || !virsh_check.unwrap().status.success() {
-        println!("Skipping libvirt list test - virsh not available");
-        return;
-    }
-
     let output = Command::new(&bck)
         .args(["libvirt", "list"])
         .output()
@@ -197,12 +189,6 @@ pub fn test_libvirt_ssh_integration() {
 
 /// Test full libvirt run + SSH workflow like run_ephemeral SSH tests
 pub fn test_libvirt_run_ssh_full_workflow() {
-    // Skip if running in CI/container environment without libvirt
-    if std::env::var("CI").is_ok() || !std::path::Path::new("/usr/bin/virsh").exists() {
-        println!("Skipping full SSH workflow test - no libvirt available");
-        return;
-    }
-
     let bck = get_bck_command().unwrap();
     let test_image = get_test_image();
 
@@ -254,36 +240,6 @@ pub fn test_libvirt_run_ssh_full_workflow() {
     if !create_output.status.success() {
         cleanup_domain(&domain_name);
 
-        // Check for acceptable failures (no libvirt, permissions, etc.)
-        let acceptable_failures = [
-            "pool",
-            "connect",
-            "Permission denied",
-            "libvirt",
-            "KVM",
-            "kvm",
-            "nested",
-            "hardware",
-            "acceleration",
-            "Storage pool",
-            "qemu",
-            "network",
-        ];
-
-        let is_acceptable = acceptable_failures.iter().any(|&pattern| {
-            create_stderr
-                .to_lowercase()
-                .contains(&pattern.to_lowercase())
-        });
-
-        if is_acceptable {
-            println!(
-                "Skipping full SSH workflow test - libvirt not properly configured: {}",
-                create_stderr
-            );
-            return;
-        }
-
         panic!("Failed to create domain with SSH: {}", create_stderr);
     }
 
@@ -320,31 +276,7 @@ pub fn test_libvirt_run_ssh_full_workflow() {
 
     // Check SSH results
     if !ssh_output.status.success() {
-        // SSH might fail due to VM not being ready, network issues, etc.
-        let acceptable_ssh_failures = [
-            "connection",
-            "timeout",
-            "refused",
-            "network",
-            "ssh",
-            "not running",
-            "boot",
-        ];
-
-        let is_acceptable = acceptable_ssh_failures
-            .iter()
-            .any(|&pattern| ssh_stderr.to_lowercase().contains(&pattern.to_lowercase()));
-
-        if is_acceptable {
-            println!(
-                "SSH connection failed (may be expected in test environment): {}",
-                ssh_stderr
-            );
-            println!("Full workflow test completed - domain creation and SSH integration working");
-            return;
-        }
-
-        panic!("SSH connection failed unexpectedly: {}", ssh_stderr);
+        panic!("SSH connection failed: {}", ssh_stderr);
     }
 
     // Verify we got the expected output
@@ -436,12 +368,6 @@ fn wait_for_ssh_available(
 
 /// Test VM startup and shutdown with libvirt run
 pub fn test_libvirt_vm_lifecycle() {
-    // Skip if running in CI/container environment without libvirt
-    if std::env::var("CI").is_ok() || !std::path::Path::new("/usr/bin/virsh").exists() {
-        println!("Skipping VM lifecycle test - no libvirt available");
-        return;
-    }
-
     let bck = get_bck_command().unwrap();
     let test_volume = "test-vm-lifecycle";
     let domain_name = format!("bootc-{}", test_volume);
@@ -473,18 +399,7 @@ pub fn test_libvirt_vm_lifecycle() {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        println!("Create failed (expected in CI): {}", stderr);
-
-        // If creation fails (e.g., no libvirt storage), skip the test
-        if stderr.contains("pool")
-            || stderr.contains("connect")
-            || stderr.contains("Permission denied")
-        {
-            println!("Skipping VM lifecycle test - libvirt not properly configured");
-            return;
-        }
-
-        panic!("Unexpected failure in VM creation: {}", stderr);
+        panic!("Failed to create VM: {}", stderr);
     }
 
     println!("Created VM domain: {}", domain_name);
@@ -524,27 +439,7 @@ pub fn test_libvirt_vm_lifecycle() {
         }
     } else {
         let stderr = String::from_utf8_lossy(&start_output.stderr);
-        println!("VM start failed (may be expected): {}", stderr);
-
-        // Some failures are acceptable (no KVM, nested virtualization, etc.)
-        let acceptable_failures = [
-            "KVM",
-            "kvm",
-            "nested",
-            "hardware",
-            "acceleration",
-            "permission",
-            "qemu",
-            "network",
-        ];
-
-        let is_acceptable = acceptable_failures
-            .iter()
-            .any(|&pattern| stderr.to_lowercase().contains(pattern));
-
-        if !is_acceptable {
-            panic!("Unexpected VM start failure: {}", stderr);
-        }
+        panic!("VM start failed: {}", stderr);
     }
 
     // Cleanup - remove the domain
