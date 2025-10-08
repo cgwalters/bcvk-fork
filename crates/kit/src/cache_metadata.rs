@@ -70,7 +70,7 @@ pub struct DiskImageMetadata {
 
 impl DiskImageMetadata {
     /// Generate SHA256 hash of all build inputs
-    fn compute_cache_hash(&self) -> String {
+    pub fn compute_cache_hash(&self) -> String {
         let inputs = CacheInputs {
             image_digest: self.digest.clone(),
             filesystem: self.filesystem.clone(),
