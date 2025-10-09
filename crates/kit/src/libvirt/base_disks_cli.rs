@@ -45,7 +45,7 @@ pub struct PruneOpts {
 
 /// Execute the base-disks command
 pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtBaseDisksOpts) -> Result<()> {
-    let connect_uri = global_opts.connect.as_ref();
+    let connect_uri = global_opts.connect.as_deref();
 
     match opts.command {
         BaseDisksSubcommand::List(list_opts) => run_list(connect_uri, list_opts),
@@ -54,7 +54,7 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtBaseDisksO
 }
 
 /// Execute the list subcommand
-fn run_list(connect_uri: Option<&String>, opts: ListOpts) -> Result<()> {
+fn run_list(connect_uri: Option<&str>, opts: ListOpts) -> Result<()> {
     let base_disks = list_base_disks(connect_uri)?;
 
     match opts.format {
@@ -115,7 +115,7 @@ fn run_list(connect_uri: Option<&String>, opts: ListOpts) -> Result<()> {
 }
 
 /// Execute the prune subcommand
-fn run_prune(connect_uri: Option<&String>, opts: PruneOpts) -> Result<()> {
+fn run_prune(connect_uri: Option<&str>, opts: PruneOpts) -> Result<()> {
     if opts.dry_run {
         println!("Dry run: showing base disks that would be removed");
     }
