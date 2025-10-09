@@ -18,7 +18,7 @@ pub fn find_or_create_base_disk(
     image_digest: &str,
     install_options: &InstallOptions,
     kernel_args: &[String],
-    connect_uri: Option<&String>,
+    connect_uri: Option<&str>,
 ) -> Result<Utf8PathBuf> {
     let metadata = DiskImageMetadata::from(install_options, image_digest, kernel_args);
     let cache_hash = metadata.compute_cache_hash();
@@ -82,7 +82,7 @@ fn create_base_disk(
     image_digest: &str,
     install_options: &InstallOptions,
     kernel_args: &[String],
-    connect_uri: Option<&String>,
+    connect_uri: Option<&str>,
 ) -> Result<()> {
     use crate::run_ephemeral::CommonVmOpts;
     use crate::to_disk::{Format, ToDiskAdditionalOpts, ToDiskOpts};
@@ -166,10 +166,7 @@ fn create_base_disk(
             }
 
             // Refresh libvirt storage pool so the new disk is visible to virsh
-            let mut cmd = crate::hostexec::command("virsh", None)?;
-            if let Some(uri) = connect_uri {
-                cmd.arg("-c").arg(uri);
-            }
+            let mut cmd = super::run::virsh_command(connect_uri)?;
             cmd.args(&["pool-refresh", "default"]);
 
             if let Err(e) = cmd
@@ -200,7 +197,7 @@ fn create_base_disk(
 pub fn clone_from_base(
     base_disk_path: &Utf8Path,
     vm_name: &str,
-    connect_uri: Option<&String>,
+    connect_uri: Option<&str>,
 ) -> Result<Utf8PathBuf> {
     let pool_path = super::run::get_libvirt_storage_pool_path(connect_uri)?;
 
@@ -209,20 +206,13 @@ pub fn clone_from_base(
     let vm_disk_path = pool_path.join(&vm_disk_name);
 
     // Refresh the storage pool so libvirt knows about all files
-    let mut refresh_cmd = crate::hostexec::command("virsh", None)?;
-    if let Some(uri) = connect_uri {
-        refresh_cmd.arg("-c").arg(uri);
-    }
+    let mut refresh_cmd = super::run::virsh_command(connect_uri)?;
     refresh_cmd.args(&["pool-refresh", "default"]);
     let _ = refresh_cmd.output(); // Ignore errors, pool might not exist yet
 
     // Try to delete the volume if it exists (either as a file or in libvirt's view)
     // This handles both cases: file exists but not tracked, or tracked by libvirt
-    let mut cmd = crate::hostexec::command("virsh", None)?;
-    if let Some(uri) = connect_uri {
-        cmd.arg("-c").arg(uri);
-    }
-
+    let mut cmd = super::run::virsh_command(connect_uri)?;
     cmd.args(&["vol-delete", "--pool", "default", &vm_disk_name]);
 
     let output = cmd
@@ -270,12 +260,7 @@ pub fn clone_from_base(
         color_eyre::eyre::eyre!("Base disk path has no filename: {:?}", base_disk_path)
     })?;
 
-    let mut cmd = crate::hostexec::command("virsh", None)?;
-
-    if let Some(uri) = connect_uri {
-        cmd.arg("-c").arg(uri);
-    }
-
+    let mut cmd = super::run::virsh_command(connect_uri)?;
     cmd.args(&[
         "vol-create-as",
         "default",
@@ -309,7 +294,7 @@ pub fn clone_from_base(
 }
 
 /// List all base disks in the storage pool with reference counts
-pub fn list_base_disks(connect_uri: Option<&String>) -> Result<Vec<BaseDiskInfo>> {
+pub fn list_base_disks(connect_uri: Option<&str>) -> Result<Vec<BaseDiskInfo>> {
     use super::run::list_storage_pool_volumes;
 
     let pool_path = super::run::get_libvirt_storage_pool_path(connect_uri)?;
@@ -372,7 +357,7 @@ pub struct BaseDiskInfo {
 }
 
 /// Prune unreferenced base disks
-pub fn prune_base_disks(connect_uri: Option<&String>, dry_run: bool) -> Result<Vec<Utf8PathBuf>> {
+pub fn prune_base_disks(connect_uri: Option<&str>, dry_run: bool) -> Result<Vec<Utf8PathBuf>> {
     use super::run::list_storage_pool_volumes;
 
     let base_disks = list_base_disks(connect_uri)?;
@@ -407,10 +392,7 @@ pub fn prune_base_disks(connect_uri: Option<&String>, dry_run: bool) -> Result<V
                     color_eyre::eyre::eyre!("Base disk path has no filename: {:?}", base_disk.path)
                 })?;
 
-                let mut cmd = crate::hostexec::command("virsh", None)?;
-                if let Some(uri) = connect_uri {
-                    cmd.arg("-c").arg(uri);
-                }
+                let mut cmd = super::run::virsh_command(connect_uri)?;
                 cmd.args(&["vol-delete", "--pool", "default", base_disk_name]);
 
                 let output = cmd.output().with_context(|| {

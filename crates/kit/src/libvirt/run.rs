@@ -17,6 +17,15 @@ use crate::libvirt::domain::VirtiofsFilesystem;
 use crate::utils::parse_memory_to_mb;
 use crate::xml_utils;
 
+/// Create a virsh command with optional connection URI
+pub(super) fn virsh_command(connect_uri: Option<&str>) -> Result<std::process::Command> {
+    let mut cmd = crate::hostexec::command("virsh", None)?;
+    if let Some(uri) = connect_uri {
+        cmd.arg("-c").arg(uri);
+    }
+    Ok(cmd)
+}
+
 /// Firmware type for virtual machines
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 #[clap(rename_all = "kebab-case")]
@@ -117,8 +126,8 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
     // Validate labels don't contain commas
     opts.validate_labels()?;
 
-    let connect_uri = global_opts.connect.as_ref();
-    let lister = match connect_uri {
+    let connect_uri = global_opts.connect.as_deref();
+    let lister = match global_opts.connect.as_ref() {
         Some(uri) => DomainLister::with_connection(uri.clone()),
         None => DomainLister::new(),
     };
@@ -231,24 +240,38 @@ fn get_default_pool_path(connect_uri: &str) -> Utf8PathBuf {
 }
 
 /// Ensure the default libvirt storage pool exists, creating it if necessary
-fn ensure_default_pool(connect_uri: &str) -> Result<()> {
+fn ensure_default_pool(connect_uri: Option<&str>) -> Result<()> {
     // Check if default pool already exists
-    let mut cmd = crate::hostexec::command("virsh", None)?;
-    cmd.args(&["-c", connect_uri, "pool-info", "default"]);
+    let mut cmd = virsh_command(connect_uri)?;
+    cmd.args(&["pool-info", "default"]);
     let output = cmd
         .output()
         .with_context(|| "Failed to check for default pool")?;
 
     if output.status.success() {
         // Pool exists, make sure it's active
-        let mut cmd = crate::hostexec::command("virsh", None)?;
-        cmd.args(&["-c", connect_uri, "pool-start", "default"]);
+        let mut cmd = virsh_command(connect_uri)?;
+        cmd.args(&["pool-start", "default"]);
         let _ = cmd.output(); // Ignore errors if already started
         return Ok(());
     }
 
     // Pool doesn't exist, need to create it
-    let pool_path = get_default_pool_path(connect_uri);
+    // Determine the appropriate pool path based on the connection URI
+    let pool_path = if let Some(uri) = connect_uri {
+        get_default_pool_path(uri)
+    } else {
+        // If no URI specified, virsh will use its default connection
+        // We need to query what that is to determine the appropriate pool path
+        let mut cmd = virsh_command(None)?;
+        cmd.args(&["uri"]);
+        let output = cmd
+            .output()
+            .with_context(|| "Failed to query default libvirt URI")?;
+        let uri_str = String::from_utf8(output.stdout)
+            .with_context(|| "Invalid UTF-8 in virsh uri output")?;
+        get_default_pool_path(uri_str.trim())
+    };
     info!("Creating default storage pool at {:?}", pool_path);
 
     // Create the directory if it doesn't exist
@@ -271,8 +294,8 @@ fn ensure_default_pool(connect_uri: &str) -> Result<()> {
     std::fs::write(xml_path, &pool_xml).with_context(|| "Failed to write pool XML")?;
 
     // Define the pool
-    let mut cmd = crate::hostexec::command("virsh", None)?;
-    cmd.args(&["-c", connect_uri, "pool-define", xml_path]);
+    let mut cmd = virsh_command(connect_uri)?;
+    cmd.args(&["pool-define", xml_path]);
     let output = cmd.output().with_context(|| "Failed to define pool")?;
 
     if !output.status.success() {
@@ -285,13 +308,13 @@ fn ensure_default_pool(connect_uri: &str) -> Result<()> {
     }
 
     // Build the pool (creates directory structure)
-    let mut cmd = crate::hostexec::command("virsh", None)?;
-    cmd.args(&["-c", connect_uri, "pool-build", "default"]);
+    let mut cmd = virsh_command(connect_uri)?;
+    cmd.args(&["pool-build", "default"]);
     let _ = cmd.output(); // Directory might already exist
 
     // Start the pool
-    let mut cmd = crate::hostexec::command("virsh", None)?;
-    cmd.args(&["-c", connect_uri, "pool-start", "default"]);
+    let mut cmd = virsh_command(connect_uri)?;
+    cmd.args(&["pool-start", "default"]);
     let output = cmd.output().with_context(|| "Failed to start pool")?;
 
     if !output.status.success() {
@@ -304,8 +327,8 @@ fn ensure_default_pool(connect_uri: &str) -> Result<()> {
     }
 
     // Autostart the pool
-    let mut cmd = crate::hostexec::command("virsh", None)?;
-    cmd.args(&["-c", connect_uri, "pool-autostart", "default"]);
+    let mut cmd = virsh_command(connect_uri)?;
+    cmd.args(&["pool-autostart", "default"]);
     let _ = cmd.output(); // Not critical if this fails
 
     // Clean up temporary XML file
@@ -316,67 +339,27 @@ fn ensure_default_pool(connect_uri: &str) -> Result<()> {
 }
 
 /// Get the path of the default libvirt storage pool
-pub fn get_libvirt_storage_pool_path(connect_uri: Option<&String>) -> Result<Utf8PathBuf> {
-    // If a specific connection URI is provided, use it
-    if let Some(uri) = connect_uri {
-        // Ensure pool exists before querying
-        ensure_default_pool(uri)?;
+pub fn get_libvirt_storage_pool_path(connect_uri: Option<&str>) -> Result<Utf8PathBuf> {
+    // Ensure pool exists before querying
+    ensure_default_pool(connect_uri)?;
 
-        let mut cmd = crate::hostexec::command("virsh", None)?;
-        cmd.args(&["-c", uri, "pool-dumpxml", "default"]);
-        let output = cmd
-            .output()
-            .with_context(|| "Failed to query libvirt storage pool")?;
-
-        if output.status.success() {
-            let xml = String::from_utf8(output.stdout)
-                .with_context(|| "Invalid UTF-8 in virsh output")?;
-            let dom = xml_utils::parse_xml_dom(&xml)
-                .with_context(|| "Failed to parse storage pool XML")?;
-
-            if let Some(path_node) = dom.find("path") {
-                let path_str = path_node.text_content().trim();
-                if !path_str.is_empty() {
-                    return Ok(Utf8PathBuf::from(path_str));
-                }
-            }
-        }
-    }
-
-    // Try user session first (qemu:///session)
-    let session_uri = "qemu:///session";
-    ensure_default_pool(session_uri)?;
-
-    let mut cmd = crate::hostexec::command("virsh", None)?;
-    cmd.args(&["-c", session_uri, "pool-dumpxml", "default"]);
-    let output = cmd.output();
-
-    let (output, uri_used) = match output {
-        Ok(o) if o.status.success() => (o, session_uri),
-        _ => {
-            // Try system session (qemu:///system)
-            let system_uri = "qemu:///system";
-            ensure_default_pool(system_uri)?;
-
-            let mut cmd = crate::hostexec::command("virsh", None)?;
-            cmd.args(&["-c", system_uri, "pool-dumpxml", "default"]);
-            let out = cmd
-                .output()
-                .with_context(|| "Failed to query libvirt storage pool")?;
-            (out, system_uri)
-        }
-    };
+    let mut cmd = virsh_command(connect_uri)?;
+    cmd.args(&["pool-dumpxml", "default"]);
+    let output = cmd
+        .output()
+        .with_context(|| "Failed to query libvirt storage pool")?;
 
     if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let uri_desc = connect_uri.unwrap_or("default connection");
         return Err(color_eyre::eyre::eyre!(
-            "Failed to get default storage pool info for {}",
-            uri_used
+            "Failed to get default storage pool info for {}: {}",
+            uri_desc,
+            stderr
         ));
     }
 
     let xml = String::from_utf8(output.stdout).with_context(|| "Invalid UTF-8 in virsh output")?;
-
-    // Parse XML using DOM parser and extract path element
     let dom = xml_utils::parse_xml_dom(&xml).with_context(|| "Failed to parse storage pool XML")?;
 
     if let Some(path_node) = dom.find("path") {
@@ -432,7 +415,7 @@ fn generate_unique_vm_name(image: &str, existing_domains: &[String]) -> String {
 }
 
 /// List all volumes in the default storage pool
-pub fn list_storage_pool_volumes(connect_uri: Option<&String>) -> Result<Vec<Utf8PathBuf>> {
+pub fn list_storage_pool_volumes(connect_uri: Option<&str>) -> Result<Vec<Utf8PathBuf>> {
     // Get the storage pool path from XML
     let pool_path = get_libvirt_storage_pool_path(connect_uri)?;
 
