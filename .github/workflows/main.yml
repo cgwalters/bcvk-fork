@@ -50,6 +50,14 @@ jobs:
       - name: Run integration tests
         run: just test-integration
 
+      - name: Upload junit XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-junit-xml
+          path: target/nextest/integration/junit.xml
+          retention-days: 7
+
       - name: Create archive
         run: just archive
         

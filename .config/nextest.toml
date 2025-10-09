@@ -27,3 +27,8 @@ success-output = "never"
 status-level = "pass"
 # Only run integration tests with this profile
 default-filter = "package(integration-tests)"
+
+[profile.integration.junit]
+path = "junit.xml"
+store-success-output = true
+store-failure-output = true
