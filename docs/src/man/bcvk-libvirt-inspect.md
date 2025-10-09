@@ -23,6 +23,11 @@ Show detailed information about a libvirt domain
 
     Output format
 
+    Possible values:
+    - table
+    - json
+    - yaml
+
     Default: yaml
 
 <!-- END GENERATED OPTIONS -->
