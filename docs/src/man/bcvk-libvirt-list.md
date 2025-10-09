@@ -17,6 +17,11 @@ List available bootc volumes with metadata
 
     Output format
 
+    Possible values:
+    - table
+    - json
+    - yaml
+
     Default: table
 
 **-a**, **--all**
