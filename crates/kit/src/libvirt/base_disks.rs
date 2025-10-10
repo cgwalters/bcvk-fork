@@ -444,25 +444,14 @@ pub fn clone_from_base(
         color_eyre::eyre::eyre!("Base disk path has no filename: {:?}", base_disk_path)
     })?;
 
-    let mut dumpxml_cmd = super::run::virsh_command(connect_uri)?;
-    dumpxml_cmd.args(&["vol-dumpxml", "--pool", "default", base_disk_filename]);
-
-    let output = dumpxml_cmd
-        .output()
-        .with_context(|| format!("Failed to run virsh vol-dumpxml for {}", base_disk_filename))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(color_eyre::eyre::eyre!(
-            "Failed to get base disk info: {}",
-            stderr
-        ));
-    }
-
-    // Parse the capacity from vol-dumpxml output (XML with capacity in bytes)
-    let xml = String::from_utf8_lossy(&output.stdout);
-    let dom = crate::xml_utils::parse_xml_dom(&xml)
-        .with_context(|| "Failed to parse vol-dumpxml output")?;
+    let dom = super::run::run_virsh_xml(
+        connect_uri,
+        &["vol-dumpxml", "--pool", "default", base_disk_filename],
+    )
+    .context(format!(
+        "Failed to get base disk info for {}",
+        base_disk_filename
+    ))?;
 
     let capacity_node = dom
         .find("capacity")
