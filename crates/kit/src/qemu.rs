@@ -934,12 +934,15 @@ pub async fn spawn_virtiofsd_async(config: &VirtiofsConfig) -> Result<tokio::pro
         &config.sandbox,
     ]);
 
+    // https://gitlab.com/virtio-fs/virtiofsd/-/issues/17 - this is the new default,
+    // but we want to be compatible with older virtiofsd too.
+    cmd.arg("--inode-file-handles=fallback");
+
     // Redirect stdout/stderr to /dev/null unless debug mode is enabled
     if !config.debug {
         cmd.stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
     } else {
-        // In debug mode, prefix output to distinguish from QEMU
         cmd.stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
     }
