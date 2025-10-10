@@ -185,19 +185,6 @@ impl QemuConfig {
         }
     }
 
-    /// Create a new config with disk boot
-    pub fn new_disk_boot(memory_mb: u32, vcpus: u32, primary_disk: String) -> Self {
-        Self {
-            memory_mb,
-            vcpus,
-            boot_mode: Some(BootMode::DiskBoot {
-                primary_disk,
-                uefi: false,
-            }),
-            ..Default::default()
-        }
-    }
-
     // Enable vsock
     pub fn enable_vsock(&mut self) -> Result<()> {
         let fd = OpenOptions::new()
@@ -278,11 +265,6 @@ impl QemuConfig {
         Ok(())
     }
 
-    /// Add a virtio-blk device
-    pub fn add_virtio_blk_device(&mut self, disk_file: String, serial: String) -> &mut Self {
-        self.add_virtio_blk_device_with_format(disk_file, serial, crate::to_disk::Format::Raw)
-    }
-
     /// Add a virtio-blk device with specified format
     pub fn add_virtio_blk_device_with_format(
         &mut self,
@@ -312,13 +294,6 @@ impl QemuConfig {
             tag: tag.to_owned(),
         });
         self.virtiofs_configs.push(config);
-        self
-    }
-
-    /// Add a virtiofs mount (for pre-spawned daemons)
-    pub fn add_virtiofs_mount(&mut self, socket_path: String, tag: String) -> &mut Self {
-        self.additional_mounts
-            .push(VirtiofsMount { socket_path, tag });
         self
     }
 
@@ -887,40 +862,6 @@ mod tests {
             "/tmp/output.txt"
         );
     }
-
-    #[test]
-    fn test_virtio_blk_device_creation() {
-        let mut config = QemuConfig::new_disk_boot(1024, 1, "/tmp/boot.img".to_string());
-        config
-            .add_virtio_blk_device("/tmp/test.img".to_string(), "output".to_string())
-            .set_console(true);
-
-        // Test that the config is created correctly
-        assert_eq!(config.virtio_blk_devices.len(), 1);
-        assert_eq!(config.virtio_blk_devices[0].disk_file, "/tmp/test.img");
-        assert_eq!(config.virtio_blk_devices[0].serial, "output");
-        assert_eq!(
-            config.virtio_blk_devices[0].format,
-            crate::to_disk::Format::Raw
-        );
-    }
-
-    #[test]
-    fn test_disk_boot_config() {
-        let mut config = QemuConfig::new_disk_boot(2048, 2, "/tmp/disk.img".to_string());
-        config.set_uefi_boot(true).set_console(false);
-
-        if let Some(BootMode::DiskBoot { primary_disk, uefi }) = config.boot_mode.as_ref() {
-            assert_eq!(primary_disk, "/tmp/disk.img");
-            assert_eq!(*uefi, true);
-        } else {
-            panic!("Expected DiskBoot mode");
-        }
-
-        assert_eq!(config.memory_mb, 2048);
-        assert_eq!(config.vcpus, 2);
-        assert_eq!(config.enable_console, false);
-    }
 }
 
 /// VirtiofsD daemon configuration.
@@ -1001,65 +942,6 @@ pub async fn spawn_virtiofsd_async(config: &VirtiofsConfig) -> Result<tokio::pro
         // In debug mode, prefix output to distinguish from QEMU
         cmd.stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
-    }
-
-    let child = cmd.spawn().with_context(|| {
-        format!(
-            "Failed to spawn virtiofsd. Binary: {}, Socket: {}, Shared dir: {}",
-            virtiofsd_binary, config.socket_path, config.shared_dir
-        )
-    })?;
-
-    debug!(
-        "Spawned virtiofsd: binary={}, socket={}, shared_dir={}, debug={}",
-        virtiofsd_binary, config.socket_path, config.shared_dir, config.debug
-    );
-
-    Ok(child)
-}
-
-/// Spawn virtiofsd daemon process.
-/// Searches for binary in /usr/libexec, /usr/bin, /usr/local/bin.
-/// Creates socket directory if needed, redirects output unless debug=true.
-pub fn spawn_virtiofsd(config: &VirtiofsConfig) -> Result<Child> {
-    // Validate configuration
-    validate_virtiofsd_config(config)?;
-
-    // Try common virtiofsd binary locations
-    let virtiofsd_paths = [
-        "/usr/libexec/virtiofsd",
-        "/usr/bin/virtiofsd",
-        "/usr/local/bin/virtiofsd",
-    ];
-
-    let virtiofsd_binary = virtiofsd_paths
-        .iter()
-        .find(|path| std::path::Path::new(path).exists())
-        .ok_or_else(|| {
-            eyre!(
-                "virtiofsd binary not found. Searched paths: {}. Please install virtiofsd.",
-                virtiofsd_paths.join(", ")
-            )
-        })?;
-
-    let mut cmd = Command::new(virtiofsd_binary);
-    cmd.args([
-        "--socket-path",
-        &config.socket_path,
-        "--shared-dir",
-        &config.shared_dir,
-        "--cache",
-        &config.cache_mode,
-        "--sandbox",
-        &config.sandbox,
-    ]);
-
-    // Redirect stdout/stderr to /dev/null unless debug mode is enabled
-    if !config.debug {
-        cmd.stdout(Stdio::null()).stderr(Stdio::null());
-    } else {
-        // In debug mode, prefix output to distinguish from QEMU
-        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     }
 
     let child = cmd.spawn().with_context(|| {
