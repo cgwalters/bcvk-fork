@@ -1149,16 +1149,17 @@ Options=
     let systemd_has_vmm_notify = systemd_version
         .map(|v| v.has_vmm_notify())
         .unwrap_or_default();
+    let mut status_writer_task = None;
     if vsock_enabled && systemd_has_vmm_notify {
         let (piper, pipew) = rustix::pipe::pipe()?;
         qemu_config.systemd_notify = Some(File::from(pipew));
         debug!("Enabling systemd notification debugging");
 
         // Run this in the background
-        let _ = tokio::task::spawn(boot_progress::monitor_boot_progress(
+        status_writer_task = Some(tokio::task::spawn(boot_progress::monitor_boot_progress(
             File::from(piper),
             status_writer_clone,
-        ));
+        )));
     } else {
         debug!("systemd version does not support vmm.notify_socket",);
         // For older systemd versions, write an unknown state
@@ -1171,7 +1172,16 @@ Options=
     debug!("Starting QEMU with systemd debugging enabled");
 
     // Spawn QEMU with all virtiofsd processes handled internally
-    let mut qemu = crate::qemu::RunningQemu::spawn(qemu_config).await?;
+    let mut qemu = match crate::qemu::RunningQemu::spawn(qemu_config).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::trace!("Aborting status writer");
+            if let Some(writer) = status_writer_task {
+                writer.abort();
+            }
+            return Err(e);
+        }
+    };
 
     // Handle execute command output streaming if needed
     if let Some((exec_pipefd, status_pipefd)) = exec_pipes {
@@ -1208,6 +1218,7 @@ Options=
         }
     } else {
         // Wait for QEMU to complete
+        tracing::debug!("Waiting for qemu exit");
         let exit_status = qemu.wait().await?;
         if !exit_status.success() {
             return Err(eyre!("QEMU exited with non-zero status: {}", exit_status));

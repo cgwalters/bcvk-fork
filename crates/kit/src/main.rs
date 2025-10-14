@@ -220,7 +220,12 @@ fn main() -> Result<(), Report> {
         }
         Commands::ContainerEntrypoint(opts) => {
             // Create a tokio runtime for async container entrypoint operations
-            rt.block_on(container_entrypoint::run(opts))?;
+            rt.block_on(async move {
+                let r = container_entrypoint::run(opts).await;
+                tracing::debug!("Container entrypoint done");
+                r
+            })?;
+            tracing::trace!("Exiting runtime");
         }
         Commands::DebugInternals(opts) => match opts.command {
             DebugInternalsCmds::OpenTree { path } => {
@@ -243,5 +248,7 @@ fn main() -> Result<(), Report> {
         },
     }
     tracing::debug!("exiting");
+    // Ensure we don't block on any spawned tasks
+    rt.shutdown_background();
     std::process::exit(0)
 }
