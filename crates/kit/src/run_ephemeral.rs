@@ -817,7 +817,7 @@ pub(crate) async fn run_impl(opts: RunEphemeralOpts) -> Result<()> {
             let entry = entry?;
             let mount_name = entry.file_name();
             let mount_name_str = mount_name.to_string_lossy();
-            let source_path = entry.path();
+            let source_path: Utf8PathBuf = entry.path().try_into()?;
             let mount_path = format!("/run/host-mounts/{}", mount_name_str);
 
             // Check if this directory is mounted as read-only
@@ -836,8 +836,8 @@ pub(crate) async fn run_impl(opts: RunEphemeralOpts) -> Result<()> {
 
             // Store virtiofsd config to be spawned later by QEMU
             let virtiofsd_config = qemu::VirtiofsConfig {
-                socket_path: socket_path.clone(),
-                shared_dir: source_path.to_string_lossy().to_string(),
+                socket_path: socket_path.clone().into(),
+                shared_dir: source_path,
                 debug: false,
             };
             additional_mounts.push((virtiofsd_config, tag.clone()));

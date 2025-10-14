@@ -11,6 +11,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
+use camino::Utf8PathBuf;
 use cap_std_ext::cmdext::CapStdExtCommandExt;
 use color_eyre::eyre::{eyre, Context};
 use color_eyre::Result;
@@ -117,7 +118,7 @@ pub enum BootMode {
         initramfs_path: String,
         kernel_cmdline: Vec<String>,
         /// VirtIO-FS socket for root filesystem
-        virtiofs_socket: String,
+        virtiofs_socket: Utf8PathBuf,
     },
     #[allow(dead_code)]
     DiskBoot {
@@ -170,7 +171,7 @@ impl QemuConfig {
         vcpus: u32,
         kernel_path: String,
         initramfs_path: String,
-        virtiofs_socket: String,
+        virtiofs_socket: Utf8PathBuf,
     ) -> Self {
         Self {
             memory_mb,
@@ -290,7 +291,7 @@ impl QemuConfig {
     pub fn add_virtiofs(&mut self, config: VirtiofsConfig, tag: &str) -> &mut Self {
         // Also add a corresponding mount so QEMU knows about it
         self.additional_mounts.push(VirtiofsMount {
-            socket_path: config.socket_path.clone(),
+            socket_path: config.socket_path.clone().into(),
             tag: tag.to_owned(),
         });
         self.virtiofs_configs.push(config);
@@ -799,7 +800,8 @@ impl RunningQemu {
             let process = spawn_virtiofsd_async(main_config).await?;
             virtiofsd_processes.push(process);
             // Wait for socket to be ready before proceeding
-            wait_for_virtiofsd_socket(&main_config.socket_path, Duration::from_secs(10)).await?;
+            wait_for_virtiofsd_socket(main_config.socket_path.as_str(), Duration::from_secs(10))
+                .await?;
         }
 
         // Spawn additional virtiofsd processes
@@ -809,8 +811,11 @@ impl RunningQemu {
             virtiofsd_processes.push(process);
 
             // Wait for socket to be ready before proceeding
-            wait_for_virtiofsd_socket(&virtiofs_config.socket_path, Duration::from_secs(10))
-                .await?;
+            wait_for_virtiofsd_socket(
+                virtiofs_config.socket_path.as_str(),
+                Duration::from_secs(10),
+            )
+            .await?;
         }
         // Spawn QEMU process with additional VSOCK credential if needed
         let qemu_process = spawn(&config, &creds, vsockdata)?;
@@ -847,7 +852,7 @@ mod tests {
             1,
             "/test/kernel".to_string(),
             "/test/initramfs".to_string(),
-            "/test/socket".to_string(),
+            "/test/socket".into(),
         );
         config
             .add_virtio_serial_out("serial0", "/tmp/output.txt".to_string(), false)
@@ -868,17 +873,17 @@ mod tests {
 #[derive(Debug, Clone)]
 pub struct VirtiofsConfig {
     /// Unix socket for QEMU communication
-    pub socket_path: String,
+    pub socket_path: Utf8PathBuf,
     /// Host directory to share
-    pub shared_dir: String,
+    pub shared_dir: Utf8PathBuf,
     pub debug: bool,
 }
 
 impl Default for VirtiofsConfig {
     fn default() -> Self {
         Self {
-            socket_path: "/run/inner-shared/virtiofs.sock".to_string(),
-            shared_dir: "/run/source-image".to_string(),
+            socket_path: "/run/inner-shared/virtiofs.sock".into(),
+            shared_dir: "/run/source-image".into(),
             debug: false,
         }
     }
@@ -918,9 +923,9 @@ pub async fn spawn_virtiofsd_async(config: &VirtiofsConfig) -> Result<tokio::pro
     }
     cmd.args([
         "--socket-path",
-        &config.socket_path,
+        config.socket_path.as_str(),
         "--shared-dir",
-        &config.shared_dir,
+        config.shared_dir.as_str(),
         // Ensure we don't hit fd exhaustion
         "--cache=never",
         // We always run in a container
@@ -1007,7 +1012,7 @@ pub fn validate_virtiofsd_config(config: &VirtiofsConfig) -> Result<()> {
     }
 
     // Validate socket path
-    if config.socket_path.is_empty() {
+    if config.socket_path.as_str().is_empty() {
         return Err(eyre!("Virtiofsd socket path cannot be empty"));
     }
 
@@ -1021,16 +1026,6 @@ pub fn validate_virtiofsd_config(config: &VirtiofsConfig) -> Result<()> {
                 )
             })?;
         }
-    }
-
-    // Validate sandbox mode
-    let valid_sandbox_modes = ["namespace", "chroot", "none"];
-    if !valid_sandbox_modes.contains(&config.sandbox.as_str()) {
-        return Err(eyre!(
-            "Invalid virtiofsd sandbox mode: '{}'. Valid options: {}",
-            config.sandbox,
-            valid_sandbox_modes.join(", ")
-        ));
     }
 
     Ok(())
