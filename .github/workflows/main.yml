@@ -7,6 +7,12 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  # Something seems to be setting this in the default GHA runners, which breaks bcvk
+  # as the default runner user doesn't have access
+  LIBVIRT_DEFAULT_URI: "qemu:///session"
+
+
 jobs:
   build-and-test:
     runs-on: ubuntu-24.04
