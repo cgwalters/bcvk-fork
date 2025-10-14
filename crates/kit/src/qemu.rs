@@ -865,15 +865,12 @@ mod tests {
 }
 
 /// VirtiofsD daemon configuration.
-/// Cache modes: always(default)/auto/none. Sandbox: none(default)/namespace/chroot.
 #[derive(Debug, Clone)]
 pub struct VirtiofsConfig {
     /// Unix socket for QEMU communication
     pub socket_path: String,
     /// Host directory to share
     pub shared_dir: String,
-    /// Sandbox: none/namespace/chroot
-    pub sandbox: String,
     pub debug: bool,
 }
 
@@ -882,7 +879,6 @@ impl Default for VirtiofsConfig {
         Self {
             socket_path: "/run/inner-shared/virtiofs.sock".to_string(),
             shared_dir: "/run/source-image".to_string(),
-            sandbox: "none".to_string(),
             debug: false,
         }
     }
@@ -925,9 +921,10 @@ pub async fn spawn_virtiofsd_async(config: &VirtiofsConfig) -> Result<tokio::pro
         &config.socket_path,
         "--shared-dir",
         &config.shared_dir,
+        // Ensure we don't hit fd exhaustion
         "--cache=never",
-        "--sandbox",
-        &config.sandbox,
+        // We always run in a container
+        "--sandbox=none",
     ]);
 
     // https://gitlab.com/virtio-fs/virtiofsd/-/issues/17 - this is the new default,
