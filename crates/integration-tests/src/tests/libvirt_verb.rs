@@ -9,7 +9,9 @@
 
 use std::process::Command;
 
-use crate::{get_bck_command, get_test_image, LIBVIRT_INTEGRATION_TEST_LABEL};
+use crate::{
+    get_bck_command, get_test_image, run_bcvk, run_bcvk_nocapture, LIBVIRT_INTEGRATION_TEST_LABEL,
+};
 
 /// Test libvirt list functionality (lists domains)
 pub fn test_libvirt_list_functionality() {
@@ -189,7 +191,6 @@ pub fn test_libvirt_ssh_integration() {
 
 /// Test full libvirt run + SSH workflow like run_ephemeral SSH tests
 pub fn test_libvirt_run_ssh_full_workflow() {
-    let bck = get_bck_command().unwrap();
     let test_image = get_test_image();
 
     // Generate unique domain name for this test
@@ -207,42 +208,30 @@ pub fn test_libvirt_run_ssh_full_workflow() {
     );
 
     // Cleanup any existing domain with this name
-    let _ = Command::new("virsh")
-        .args(&["destroy", &domain_name])
-        .output();
-    let _ = Command::new(&bck)
-        .args(&["libvirt", "rm", &domain_name, "--force", "--stop"])
-        .output();
+    cleanup_domain(&domain_name);
 
     // Create domain with SSH key generation
     println!("Creating libvirt domain with SSH key injection...");
-    let create_output = Command::new("timeout")
-        .args([
-            "300s", // 5 minute timeout for domain creation
-            &bck,
-            "libvirt",
-            "run",
-            "--name",
-            &domain_name,
-            "--label",
-            LIBVIRT_INTEGRATION_TEST_LABEL,
-            "--filesystem",
-            "ext4",
-            &test_image,
-        ])
-        .output()
-        .expect("Failed to run libvirt run with SSH");
+    let create_output = run_bcvk(&[
+        "libvirt",
+        "run",
+        "--name",
+        &domain_name,
+        "--label",
+        LIBVIRT_INTEGRATION_TEST_LABEL,
+        "--filesystem",
+        "ext4",
+        &test_image,
+    ])
+    .expect("Failed to run libvirt run with SSH");
 
-    let create_stdout = String::from_utf8_lossy(&create_output.stdout);
-    let create_stderr = String::from_utf8_lossy(&create_output.stderr);
+    println!("Create stdout: {}", create_output.stdout);
+    println!("Create stderr: {}", create_output.stderr);
 
-    println!("Create stdout: {}", create_stdout);
-    println!("Create stderr: {}", create_stderr);
-
-    if !create_output.status.success() {
+    if !create_output.success() {
         cleanup_domain(&domain_name);
 
-        panic!("Failed to create domain with SSH: {}", create_stderr);
+        panic!("Failed to create domain with SSH: {}", create_output.stderr);
     }
 
     println!("Successfully created domain: {}", domain_name);
@@ -253,39 +242,25 @@ pub fn test_libvirt_run_ssh_full_workflow() {
 
     // Test SSH connection with simple command
     println!("Testing SSH connection: echo 'hello world'");
-    let ssh_output = Command::new("timeout")
-        .args([
-            "60s",
-            &bck,
-            "libvirt",
-            "ssh",
-            &domain_name,
-            "--",
-            "echo",
-            "hello world",
-        ])
-        .output()
+    let ssh_output = run_bcvk(&["libvirt", "ssh", &domain_name, "--", "echo", "hello world"])
         .expect("Failed to run libvirt ssh command");
 
-    let ssh_stdout = String::from_utf8_lossy(&ssh_output.stdout);
-    let ssh_stderr = String::from_utf8_lossy(&ssh_output.stderr);
-
-    println!("SSH stdout: {}", ssh_stdout);
-    println!("SSH stderr: {}", ssh_stderr);
+    println!("SSH stdout: {}", ssh_output.stdout);
+    println!("SSH stderr: {}", ssh_output.stderr);
 
     // Cleanup domain before checking results
     cleanup_domain(&domain_name);
 
     // Check SSH results
-    if !ssh_output.status.success() {
-        panic!("SSH connection failed: {}", ssh_stderr);
+    if !ssh_output.success() {
+        panic!("SSH connection failed: {}", ssh_output.stderr);
     }
 
     // Verify we got the expected output
     assert!(
-        ssh_stdout.contains("hello world"),
+        ssh_output.stdout.contains("hello world"),
         "Expected 'hello world' in SSH output. Got: {}",
-        ssh_stdout
+        ssh_output.stdout
     );
 
     println!("✓ Successfully executed 'echo hello world' via SSH");
@@ -319,7 +294,6 @@ fn cleanup_domain(domain_name: &str) {
 
 /// Wait for SSH to become available on a domain with a timeout
 fn wait_for_ssh_available(
-    bck: &str,
     domain_name: &str,
     timeout_secs: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -333,21 +307,10 @@ fn wait_for_ssh_available(
 
     loop {
         // Try a simple SSH command to test connectivity
-        let ssh_test = Command::new("timeout")
-            .args([
-                "10s", // Short timeout for individual SSH attempts
-                bck,
-                "libvirt",
-                "ssh",
-                domain_name,
-                "--",
-                "echo",
-                "ssh-ready",
-            ])
-            .output();
+        let ssh_test = run_bcvk(&["libvirt", "ssh", domain_name, "--", "echo", "ssh-ready"]);
 
         match ssh_test {
-            Ok(output) if output.status.success() => {
+            Ok(output) if output.success() => {
                 println!("✓ SSH is now available");
                 return Ok(());
             }
@@ -513,44 +476,32 @@ pub fn test_libvirt_bind_storage_ro() {
     println!("Testing --bind-storage-ro with domain: {}", domain_name);
 
     // Cleanup any existing domain with this name
-    let _ = Command::new("virsh")
-        .args(&["destroy", &domain_name])
-        .output();
-    let _ = Command::new(&bck)
-        .args(&["libvirt", "rm", &domain_name, "--force", "--stop"])
-        .output();
+    cleanup_domain(&domain_name);
 
     // Create domain with --bind-storage-ro flag
     println!("Creating libvirt domain with --bind-storage-ro...");
-    let create_output = Command::new("timeout")
-        .args([
-            "300s", // 5 minute timeout for domain creation
-            &bck,
-            "libvirt",
-            "run",
-            "--name",
-            &domain_name,
-            "--label",
-            LIBVIRT_INTEGRATION_TEST_LABEL,
-            "--bind-storage-ro",
-            "--filesystem",
-            "ext4",
-            &test_image,
-        ])
-        .output()
-        .expect("Failed to run libvirt run with --bind-storage-ro");
+    let create_output = run_bcvk(&[
+        "libvirt",
+        "run",
+        "--name",
+        &domain_name,
+        "--label",
+        LIBVIRT_INTEGRATION_TEST_LABEL,
+        "--bind-storage-ro",
+        "--filesystem",
+        "ext4",
+        &test_image,
+    ])
+    .expect("Failed to run libvirt run with --bind-storage-ro");
 
-    let create_stdout = String::from_utf8_lossy(&create_output.stdout);
-    let create_stderr = String::from_utf8_lossy(&create_output.stderr);
+    println!("Create stdout: {}", create_output.stdout);
+    println!("Create stderr: {}", create_output.stderr);
 
-    println!("Create stdout: {}", create_stdout);
-    println!("Create stderr: {}", create_stderr);
-
-    if !create_output.status.success() {
+    if !create_output.success() {
         cleanup_domain(&domain_name);
         panic!(
             "Failed to create domain with --bind-storage-ro: {}",
-            create_stderr
+            create_output.stderr
         );
     }
 
@@ -606,92 +557,75 @@ pub fn test_libvirt_bind_storage_ro() {
     println!("✓ hoststorage tag is present in filesystem configuration");
 
     // Wait for VM to boot and SSH to become available
-    if let Err(e) = wait_for_ssh_available(&bck, &domain_name, 180) {
+    if let Err(e) = wait_for_ssh_available(&domain_name, 180) {
         cleanup_domain(&domain_name);
         panic!("Failed to establish SSH connection: {}", e);
     }
 
     // Create mount point and mount virtiofs filesystem
     println!("Creating mount point and mounting virtiofs filesystem...");
-    let mount_setup = Command::new("timeout")
-        .args([
-            "30s",
-            &bck,
-            "libvirt",
-            "ssh",
-            &domain_name,
-            "--",
-            "sudo",
-            "mkdir",
-            "-p",
-            "/run/virtiofs-mnt-hoststorage",
-        ])
-        .output()
-        .expect("Failed to create mount point");
+    let mount_setup = run_bcvk(&[
+        "libvirt",
+        "ssh",
+        &domain_name,
+        "--",
+        "sudo",
+        "mkdir",
+        "-p",
+        "/run/virtiofs-mnt-hoststorage",
+    ])
+    .expect("Failed to create mount point");
 
-    if !mount_setup.status.success() {
-        let stderr = String::from_utf8_lossy(&mount_setup.stderr);
-        println!("Warning: Failed to create mount point: {}", stderr);
+    if !mount_setup.success() {
+        println!(
+            "Warning: Failed to create mount point: {}",
+            mount_setup.stderr
+        );
     }
 
-    let mount_cmd = Command::new("timeout")
-        .args([
-            "30s",
-            &bck,
-            "libvirt",
-            "ssh",
-            &domain_name,
-            "--",
-            "sudo",
-            "mount",
-            "-t",
-            "virtiofs",
-            "hoststorage",
-            "/run/virtiofs-mnt-hoststorage",
-        ])
-        .output()
-        .expect("Failed to mount virtiofs");
+    let mount_cmd = run_bcvk(&[
+        "libvirt",
+        "ssh",
+        &domain_name,
+        "--",
+        "sudo",
+        "mount",
+        "-t",
+        "virtiofs",
+        "hoststorage",
+        "/run/virtiofs-mnt-hoststorage",
+    ])
+    .expect("Failed to mount virtiofs");
 
-    if !mount_cmd.status.success() {
+    if !mount_cmd.success() {
         cleanup_domain(&domain_name);
-        let stderr = String::from_utf8_lossy(&mount_cmd.stderr);
-        panic!("Failed to mount virtiofs filesystem: {}", stderr);
+        panic!("Failed to mount virtiofs filesystem: {}", mount_cmd.stderr);
     }
 
     // Test SSH connection and verify container storage mount inside VM
     println!("Testing SSH connection and checking container storage mount...");
-    let st = Command::new("timeout")
-        .args([
-            "60s",
-            &bck,
-            "libvirt",
-            "ssh",
-            &domain_name,
-            "--",
-            "ls",
-            "-la",
-            "/run/virtiofs-mnt-hoststorage/overlay",
-        ])
-        .status()
-        .expect("Failed to run SSH command to check container storage");
-
-    assert!(st.success());
+    run_bcvk_nocapture(&[
+        "libvirt",
+        "ssh",
+        &domain_name,
+        "--",
+        "ls",
+        "-la",
+        "/run/virtiofs-mnt-hoststorage/overlay",
+    ])
+    .expect("Failed to run SSH command to check container storage");
 
     // Verify that the mount is read-only
     println!("Verifying that the mount is read-only...");
-    let ro_test_st = Command::new("timeout")
-        .args([
-            "30s",
-            &bck,
-            "libvirt",
-            "ssh",
-            &domain_name,
-            "--",
-            "touch",
-            "/run/virtiofs-mnt-hoststorage/test-write",
-        ])
-        .status()
-        .expect("Failed to run SSH command to test read-only mount");
+    let ro_test_st = run_bcvk(&[
+        "libvirt",
+        "ssh",
+        &domain_name,
+        "--",
+        "touch",
+        "/run/virtiofs-mnt-hoststorage/test-write",
+    ])
+    .expect("Failed to run SSH command to test read-only mount");
 
     assert!(
         !ro_test_st.success(),
@@ -725,45 +659,36 @@ pub fn test_libvirt_label_functionality() {
     );
 
     // Cleanup any existing domain with this name
-    let _ = Command::new("virsh")
-        .args(&["destroy", &domain_name])
-        .output();
-    let _ = Command::new(&bck)
-        .args(&["libvirt", "rm", &domain_name, "--force", "--stop"])
-        .output();
+    cleanup_domain(&domain_name);
 
     // Create domain with multiple labels
     println!("Creating libvirt domain with multiple labels...");
-    let create_output = Command::new("timeout")
-        .args([
-            "300s",
-            &bck,
-            "libvirt",
-            "run",
-            "--name",
-            &domain_name,
-            "--label",
-            LIBVIRT_INTEGRATION_TEST_LABEL,
-            "--label",
-            "test-env",
-            "--label",
-            "temporary",
-            "--filesystem",
-            "ext4",
-            &test_image,
-        ])
-        .output()
-        .expect("Failed to run libvirt run with labels");
+    let create_output = run_bcvk(&[
+        "libvirt",
+        "run",
+        "--name",
+        &domain_name,
+        "--label",
+        LIBVIRT_INTEGRATION_TEST_LABEL,
+        "--label",
+        "test-env",
+        "--label",
+        "temporary",
+        "--filesystem",
+        "ext4",
+        &test_image,
+    ])
+    .expect("Failed to run libvirt run with labels");
 
-    let create_stdout = String::from_utf8_lossy(&create_output.stdout);
-    let create_stderr = String::from_utf8_lossy(&create_output.stderr);
+    println!("Create stdout: {}", create_output.stdout);
+    println!("Create stderr: {}", create_output.stderr);
 
-    println!("Create stdout: {}", create_stdout);
-    println!("Create stderr: {}", create_stderr);
-
-    if !create_output.status.success() {
+    if !create_output.success() {
         cleanup_domain(&domain_name);
-        panic!("Failed to create domain with labels: {}", create_stderr);
+        panic!(
+            "Failed to create domain with labels: {}",
+            create_output.stderr
+        );
     }
 
     println!("Successfully created domain with labels: {}", domain_name);

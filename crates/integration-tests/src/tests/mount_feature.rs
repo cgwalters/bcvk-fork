@@ -16,10 +16,9 @@
 
 use camino::Utf8Path;
 use std::fs;
-use std::process::Command;
 use tempfile::TempDir;
 
-use crate::{get_bck_command, get_test_image, INTEGRATION_TEST_LABEL};
+use crate::{get_test_image, run_bcvk, INTEGRATION_TEST_LABEL};
 
 /// Create a systemd unit that verifies a mount exists and contains expected content
 fn create_mount_verify_unit(
@@ -77,8 +76,6 @@ StandardError=journal+console
 }
 
 pub fn test_mount_feature_bind() {
-    let bck = get_bck_command().unwrap();
-
     // Create a temporary directory to test bind mounting
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let temp_dir_path = Utf8Path::from_path(temp_dir.path()).expect("temp dir path is not utf8");
@@ -99,39 +96,32 @@ pub fn test_mount_feature_bind() {
     println!("Testing bind mount with temp directory: {}", temp_dir_path);
 
     // Run with bind mount and verification unit
-    let output = Command::new("timeout")
-        .args([
-            "60s",
-            &bck,
-            "ephemeral",
-            "run",
-            "--rm",
-            "--label",
-            INTEGRATION_TEST_LABEL,
-            "--console",
-            "-K",
-            "--bind",
-            &format!("{}:testmount", temp_dir_path),
-            "--systemd-units",
-            units_dir_path.as_str(),
-            "--karg",
-            "systemd.unit=verify-mount-testmount.service",
-            "--karg",
-            "systemd.journald.forward_to_console=1",
-            &get_test_image(),
-        ])
-        .output()
-        .expect("Failed to run bcvk with bind mount");
+    let output = run_bcvk(&[
+        "ephemeral",
+        "run",
+        "--rm",
+        "--label",
+        INTEGRATION_TEST_LABEL,
+        "--console",
+        "-K",
+        "--bind",
+        &format!("{}:testmount", temp_dir_path),
+        "--systemd-units",
+        units_dir_path.as_str(),
+        "--karg",
+        "systemd.unit=verify-mount-testmount.service",
+        "--karg",
+        "systemd.journald.forward_to_console=1",
+        &get_test_image(),
+    ])
+    .expect("Failed to run bcvk with bind mount");
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("ok mount verify"));
+    assert!(output.stdout.contains("ok mount verify"));
 
     println!("Successfully tested and verified bind mount feature");
 }
 
 pub fn test_mount_feature_ro_bind() {
-    let bck = get_bck_command().unwrap();
-
     // Create a temporary directory to test read-only bind mounting
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let temp_dir_path = Utf8Path::from_path(temp_dir.path()).expect("temp dir path is not utf8");
@@ -154,30 +144,25 @@ pub fn test_mount_feature_ro_bind() {
     );
 
     // Run with read-only bind mount and verification unit
-    let output = Command::new("timeout")
-        .args([
-            "60s",
-            &bck,
-            "ephemeral",
-            "run",
-            "--rm",
-            "--label",
-            INTEGRATION_TEST_LABEL,
-            "--console",
-            "-K",
-            "--ro-bind",
-            &format!("{}:romount", temp_dir_path),
-            "--systemd-units",
-            units_dir_path.as_str(),
-            "--karg",
-            "systemd.unit=verify-ro-mount-romount.service",
-            "--karg",
-            "systemd.journald.forward_to_console=1",
-            &get_test_image(),
-        ])
-        .output()
-        .expect("Failed to run bcvk with ro-bind mount");
+    let output = run_bcvk(&[
+        "ephemeral",
+        "run",
+        "--rm",
+        "--label",
+        INTEGRATION_TEST_LABEL,
+        "--console",
+        "-K",
+        "--ro-bind",
+        &format!("{}:romount", temp_dir_path),
+        "--systemd-units",
+        units_dir_path.as_str(),
+        "--karg",
+        "systemd.unit=verify-ro-mount-romount.service",
+        "--karg",
+        "systemd.journald.forward_to_console=1",
+        &get_test_image(),
+    ])
+    .expect("Failed to run bcvk with ro-bind mount");
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("ok mount verify"));
+    assert!(output.stdout.contains("ok mount verify"));
 }
