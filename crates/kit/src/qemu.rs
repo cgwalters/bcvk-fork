@@ -872,8 +872,6 @@ pub struct VirtiofsConfig {
     pub socket_path: String,
     /// Host directory to share
     pub shared_dir: String,
-    /// Cache mode: always/auto/none
-    pub cache_mode: String,
     /// Sandbox: none/namespace/chroot
     pub sandbox: String,
     pub debug: bool,
@@ -884,7 +882,6 @@ impl Default for VirtiofsConfig {
         Self {
             socket_path: "/run/inner-shared/virtiofs.sock".to_string(),
             shared_dir: "/run/source-image".to_string(),
-            cache_mode: "always".to_string(),
             sandbox: "none".to_string(),
             debug: false,
         }
@@ -928,8 +925,7 @@ pub async fn spawn_virtiofsd_async(config: &VirtiofsConfig) -> Result<tokio::pro
         &config.socket_path,
         "--shared-dir",
         &config.shared_dir,
-        "--cache",
-        &config.cache_mode,
+        "--cache=never",
         "--sandbox",
         &config.sandbox,
     ]);
@@ -1028,16 +1024,6 @@ pub fn validate_virtiofsd_config(config: &VirtiofsConfig) -> Result<()> {
                 )
             })?;
         }
-    }
-
-    // Validate cache mode
-    let valid_cache_modes = ["none", "auto", "always"];
-    if !valid_cache_modes.contains(&config.cache_mode.as_str()) {
-        return Err(eyre!(
-            "Invalid virtiofsd cache mode: '{}'. Valid options: {}",
-            config.cache_mode,
-            valid_cache_modes.join(", ")
-        ));
     }
 
     // Validate sandbox mode

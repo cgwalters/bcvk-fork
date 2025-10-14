@@ -838,7 +838,6 @@ pub(crate) async fn run_impl(opts: RunEphemeralOpts) -> Result<()> {
             let virtiofsd_config = qemu::VirtiofsConfig {
                 socket_path: socket_path.clone(),
                 shared_dir: source_path.to_string_lossy().to_string(),
-                cache_mode: "always".to_string(),
                 sandbox: "none".to_string(),
                 debug: false,
             };
