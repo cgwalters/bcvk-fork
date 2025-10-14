@@ -47,6 +47,11 @@ jobs:
       - name: Run unit tests
         run: just unit
         
+      - name: Setup upterm session
+        uses: owenthereal/action-upterm@v1
+        with:
+          limit-access-to-actor: true # Restrict to the user who triggered the workflow
+
       - name: Run integration tests
         run: just test-integration ephemeral
 
