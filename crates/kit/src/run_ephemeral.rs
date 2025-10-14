@@ -251,12 +251,6 @@ pub struct RunEphemeralOpts {
     pub systemd_units_dir: Option<String>,
 
     #[clap(
-        long = "log-cmdline",
-        help = "Log full podman command before execution"
-    )]
-    pub log_cmdline: bool,
-
-    #[clap(
         long = "bind-storage-ro",
         help = "Mount host container storage (RO) at /run/virtiofs-mnt-hoststorage"
     )]
@@ -507,15 +501,6 @@ fn prepare_run_command_with_temp(
     }
 
     cmd.args([&opts.image, ENTRYPOINT]);
-
-    // Log the full command line if requested
-    if opts.log_cmdline {
-        let args: Vec<String> = cmd
-            .get_args()
-            .map(|arg| arg.to_string_lossy().to_string())
-            .collect();
-        debug!("Executing: podman {}", args.join(" "));
-    }
 
     Ok((cmd, td))
 }

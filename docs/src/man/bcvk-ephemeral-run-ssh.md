@@ -97,10 +97,6 @@ Run ephemeral VM and SSH into it
 
     Directory with systemd units to inject (expects system/ subdirectory)
 
-**--log-cmdline**
-
-    Log full podman command before execution
-
 **--bind-storage-ro**
 
     Mount host container storage (RO) at /run/virtiofs-mnt-hoststorage
