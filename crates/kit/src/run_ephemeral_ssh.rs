@@ -110,7 +110,7 @@ pub fn wait_for_ssh_ready(
     container_name: &str,
     timeout: Option<Duration>,
     progress: ProgressBar,
-) -> Result<ProgressBar> {
+) -> Result<(std::time::Duration, ProgressBar)> {
     let timeout = timeout.unwrap_or(SSH_TIMEOUT);
     let (_, progress) = wait_for_vm_ssh(container_name, Some(timeout), progress)?;
 
@@ -135,7 +135,7 @@ pub fn wait_for_ssh_ready(
         if let Ok(exit_status) = status {
             if exit_status.success() {
                 debug!("SSH connection successful, VM is ready");
-                return Ok(progress);
+                return Ok((start_time.elapsed(), progress));
             }
         }
 
@@ -165,7 +165,7 @@ pub fn run_ephemeral_ssh(opts: RunEphemeralSshOpts) -> Result<()> {
     debug!("Using container ID: {}", container_name);
 
     let progress_bar = crate::boot_progress::create_boot_progress_bar();
-    let progress_bar = wait_for_ssh_ready(&container_name, None, progress_bar)?;
+    let (_duration, progress_bar) = wait_for_ssh_ready(&container_name, None, progress_bar)?;
     progress_bar.finish_and_clear();
 
     // Execute SSH connection directly (no thread needed for this)
