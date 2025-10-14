@@ -48,7 +48,7 @@ jobs:
         run: just unit
         
       - name: Run integration tests
-        run: just test-integration
+        run: just test-integration ephemeral
 
       - name: Upload junit XML
         if: always()
