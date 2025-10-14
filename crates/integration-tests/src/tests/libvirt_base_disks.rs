@@ -8,11 +8,10 @@
 
 use std::process::Command;
 
-use crate::{get_bck_command, get_test_image};
+use crate::{get_bck_command, get_test_image, run_bcvk};
 
 /// Test that base disk is created and reused for multiple VMs
 pub fn test_base_disk_creation_and_reuse() {
-    let bck = get_bck_command().unwrap();
     let test_image = get_test_image();
 
     // Generate unique names for test VMs
@@ -33,74 +32,60 @@ pub fn test_base_disk_creation_and_reuse() {
 
     // Create first VM - this should create a new base disk
     println!("Creating first VM (should create base disk)...");
-    let vm1_output = Command::new("timeout")
-        .args([
-            "300s",
-            &bck,
-            "libvirt",
-            "run",
-            "--name",
-            &vm1_name,
-            "--filesystem",
-            "ext4",
-            &test_image,
-        ])
-        .output()
-        .expect("Failed to create first VM");
+    let vm1_output = run_bcvk(&[
+        "libvirt",
+        "run",
+        "--name",
+        &vm1_name,
+        "--filesystem",
+        "ext4",
+        &test_image,
+    ])
+    .expect("Failed to create first VM");
 
-    let vm1_stdout = String::from_utf8_lossy(&vm1_output.stdout);
-    let vm1_stderr = String::from_utf8_lossy(&vm1_output.stderr);
+    println!("VM1 stdout: {}", vm1_output.stdout);
+    println!("VM1 stderr: {}", vm1_output.stderr);
 
-    println!("VM1 stdout: {}", vm1_stdout);
-    println!("VM1 stderr: {}", vm1_stderr);
-
-    if !vm1_output.status.success() {
+    if !vm1_output.success() {
         cleanup_domain(&vm1_name);
         cleanup_domain(&vm2_name);
 
-        panic!("Failed to create first VM: {}", vm1_stderr);
+        panic!("Failed to create first VM: {}", vm1_output.stderr);
     }
 
     // Verify base disk was created
     assert!(
-        vm1_stdout.contains("Using base disk") || vm1_stdout.contains("base disk"),
+        vm1_output.stdout.contains("Using base disk") || vm1_output.stdout.contains("base disk"),
         "Should mention base disk creation"
     );
 
     // Create second VM - this should reuse the base disk
     println!("Creating second VM (should reuse base disk)...");
-    let vm2_output = Command::new("timeout")
-        .args([
-            "300s",
-            &bck,
-            "libvirt",
-            "run",
-            "--name",
-            &vm2_name,
-            "--filesystem",
-            "ext4",
-            &test_image,
-        ])
-        .output()
-        .expect("Failed to create second VM");
+    let vm2_output = run_bcvk(&[
+        "libvirt",
+        "run",
+        "--name",
+        &vm2_name,
+        "--filesystem",
+        "ext4",
+        &test_image,
+    ])
+    .expect("Failed to create second VM");
 
-    let vm2_stdout = String::from_utf8_lossy(&vm2_output.stdout);
-    let vm2_stderr = String::from_utf8_lossy(&vm2_output.stderr);
-
-    println!("VM2 stdout: {}", vm2_stdout);
-    println!("VM2 stderr: {}", vm2_stderr);
+    println!("VM2 stdout: {}", vm2_output.stdout);
+    println!("VM2 stderr: {}", vm2_output.stderr);
 
     // Cleanup before assertions
     cleanup_domain(&vm1_name);
     cleanup_domain(&vm2_name);
 
-    if !vm2_output.status.success() {
-        panic!("Failed to create second VM: {}", vm2_stderr);
+    if !vm2_output.success() {
+        panic!("Failed to create second VM: {}", vm2_output.stderr);
     }
 
     // Verify base disk was reused (should be faster and mention using existing)
     assert!(
-        vm2_stdout.contains("Using base disk") || vm2_stdout.contains("base disk"),
+        vm2_output.stdout.contains("Using base disk") || vm2_output.stdout.contains("base disk"),
         "Should mention using base disk"
     );
 
@@ -183,7 +168,6 @@ pub fn test_base_disks_prune_dry_run() {
 
 /// Test that VM disks reference base disks correctly
 pub fn test_vm_disk_references_base() {
-    let bck = get_bck_command().unwrap();
     let test_image = get_test_image();
 
     let timestamp = std::time::SystemTime::now()
@@ -197,26 +181,21 @@ pub fn test_vm_disk_references_base() {
     cleanup_domain(&vm_name);
 
     // Create VM
-    let output = Command::new("timeout")
-        .args([
-            "300s",
-            &bck,
-            "libvirt",
-            "run",
-            "--name",
-            &vm_name,
-            "--filesystem",
-            "ext4",
-            &test_image,
-        ])
-        .output()
-        .expect("Failed to create VM");
+    let output = run_bcvk(&[
+        "libvirt",
+        "run",
+        "--name",
+        &vm_name,
+        "--filesystem",
+        "ext4",
+        &test_image,
+    ])
+    .expect("Failed to create VM");
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.success() {
         cleanup_domain(&vm_name);
 
-        panic!("Failed to create VM: {}", stderr);
+        panic!("Failed to create VM: {}", output.stderr);
     }
 
     // Get VM disk path from domain XML

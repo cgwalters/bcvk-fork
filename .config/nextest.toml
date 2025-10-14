@@ -20,7 +20,8 @@ status-level = "pass"
 # Profile for integration tests - run with limited parallelism due to QEMU/KVM resources
 [profile.integration]
 test-threads = 2
-slow-timeout = { period = "500s", terminate-after = 60 }
+# Full 20 minutes for a timeout by default, since GHA runners can be really slow
+slow-timeout = { period = "1200s", terminate-after = 60 }
 fail-fast = false
 failure-output = "immediate"
 success-output = "never"

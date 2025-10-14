@@ -116,6 +116,19 @@ pub(crate) fn run_bcvk(args: &[&str]) -> std::io::Result<CapturedOutput> {
     run_command(&bck, args)
 }
 
+/// Run the bcvk command with inherited stdout/stderr (no capture)
+/// Use this when you just need to verify the command succeeded without checking output
+pub(crate) fn run_bcvk_nocapture(args: &[&str]) -> std::io::Result<()> {
+    let bck = get_bck_command().expect("Failed to get bcvk command");
+    let status = std::process::Command::new(&bck).args(args).status()?;
+    assert!(
+        status.success(),
+        "bcvk command failed with args: {:?}",
+        args
+    );
+    Ok(())
+}
+
 fn test_images_list() -> Result<()> {
     println!("Running test: bcvk images list --json");
 
