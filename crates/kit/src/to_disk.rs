@@ -84,6 +84,7 @@ use camino::Utf8PathBuf;
 use clap::{Parser, ValueEnum};
 use color_eyre::eyre::{eyre, Context};
 use color_eyre::Result;
+use indicatif::HumanDuration;
 use indoc::indoc;
 use tracing::debug;
 
@@ -432,8 +433,12 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
     let result = (|| -> Result<()> {
         // Wait for SSH to be ready
         let progress_bar = crate::boot_progress::create_boot_progress_bar();
-        let progress_bar = wait_for_ssh_ready(&container_id, None, progress_bar)?;
+        let (duration, progress_bar) = wait_for_ssh_ready(&container_id, None, progress_bar)?;
         progress_bar.finish_and_clear();
+        println!(
+            "Connected ({} elapsed), beginning installation...",
+            HumanDuration(duration)
+        );
 
         // Connect via SSH and execute the installation command
         debug!(
