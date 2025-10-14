@@ -4,10 +4,12 @@
 //! automatic process cleanup, and SMBIOS credential injection.
 
 use std::fs::{File, OpenOptions};
+use std::future::Future;
 use std::io::ErrorKind;
 use std::os::fd::{AsRawFd as _, OwnedFd};
 use std::os::unix::process::CommandExt as _;
-use std::process::{Child, Command, Stdio};
+use std::pin::Pin;
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -684,7 +686,7 @@ struct VsockCopier {
 
 pub struct RunningQemu {
     pub qemu_process: Child,
-    pub virtiofsd_processes: Vec<tokio::process::Child>,
+    pub virtiofsd_processes: Vec<Pin<Box<dyn Future<Output = std::io::Result<Output>>>>>,
     sd_notification: Option<VsockCopier>,
 }
 
@@ -792,30 +794,54 @@ impl RunningQemu {
             .unwrap_or_default();
 
         // Spawn all virtiofsd processes first
-        let mut virtiofsd_processes = Vec::new();
-
-        // Spawn main virtiofsd if configured
-        if let Some(ref main_config) = config.main_virtiofs_config {
-            debug!("Spawning main virtiofsd for: {:?}", main_config.socket_path);
-            let process = spawn_virtiofsd_async(main_config).await?;
-            virtiofsd_processes.push(process);
-            // Wait for socket to be ready before proceeding
-            wait_for_virtiofsd_socket(main_config.socket_path.as_str(), Duration::from_secs(10))
-                .await?;
+        let mut awaiting_virtiofsd = Vec::new();
+        let virtiofsd_configs = config
+            .main_virtiofs_config
+            .iter()
+            .chain(config.virtiofs_configs.iter());
+        for config in virtiofsd_configs {
+            let process = spawn_virtiofsd_async(config).await?;
+            awaiting_virtiofsd.push((process, config.socket_path.clone()));
         }
 
-        // Spawn additional virtiofsd processes
-        for virtiofs_config in &config.virtiofs_configs {
-            debug!("Spawning virtiofsd for: {:?}", virtiofs_config.socket_path);
-            let process = spawn_virtiofsd_async(virtiofs_config).await?;
-            virtiofsd_processes.push(process);
-
-            // Wait for socket to be ready before proceeding
-            wait_for_virtiofsd_socket(
-                virtiofs_config.socket_path.as_str(),
-                Duration::from_secs(10),
-            )
-            .await?;
+        // Wait for all virtiofsd to be ready
+        let mut virtiofsd_processes = Vec::new();
+        while let Some((proc, socket_path)) = awaiting_virtiofsd.pop() {
+            let socket_path = &socket_path;
+            let query_exists = async move {
+                loop {
+                    if socket_path.exists() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            };
+            tokio::pin!(query_exists);
+            let timeout_val = Duration::from_secs(60);
+            let timeout = tokio::time::sleep(timeout_val);
+            tokio::pin!(timeout);
+            debug!("Waiting for socket at {socket_path}");
+            let mut output: Pin<Box<dyn Future<Output = std::io::Result<Output>>>> =
+                Box::pin(proc.wait_with_output());
+            tokio::select! {
+                output = &mut output => {
+                    tracing::trace!("virtiofsd exited");
+                    let output = output?;
+                    let status = output.status;
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::trace!("returnign spawn error");
+                    return Err(eyre!(
+                        "virtiofsd failed to start for socket {socket_path}\nExit status: {status:?}\nOutput: {stderr}"
+                    ));
+                }
+                _ = timeout => {
+                    return Err(eyre!("timed out waiting for virtiofsd socket {} to be created (waited {timeout_val:?})", socket_path));
+                }
+                _ = query_exists => {
+                }
+            }
+            virtiofsd_processes.push(output);
+            tracing::debug!("virtiofsd socket created: {socket_path}");
         }
         // Spawn QEMU process with additional VSOCK credential if needed
         let qemu_process = spawn(&config, &creds, vsockdata)?;
@@ -825,11 +851,6 @@ impl RunningQemu {
             virtiofsd_processes,
             sd_notification,
         })
-    }
-
-    /// Add a virtiofsd process to be managed by this QEMU instance
-    pub fn add_virtiofsd_process(&mut self, process: tokio::process::Child) {
-        self.virtiofsd_processes.push(process);
     }
 
     /// Wait for QEMU process to exit
@@ -965,14 +986,8 @@ pub async fn spawn_virtiofsd_async(config: &VirtiofsConfig) -> Result<tokio::pro
     // but we want to be compatible with older virtiofsd too.
     cmd.arg("--inode-file-handles=fallback");
 
-    // Redirect stdout/stderr to /dev/null unless debug mode is enabled
-    if !config.debug {
-        cmd.stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-    } else {
-        cmd.stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-    }
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
 
     let child = cmd.spawn().with_context(|| {
         format!(
