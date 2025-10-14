@@ -103,11 +103,7 @@ impl EphemeralCommands {
                 // Create progress bar if stderr is a terminal
                 let progress_bar = crate::boot_progress::create_boot_progress_bar();
 
-                run_ephemeral_ssh::wait_for_ssh_ready(
-                    &opts.container_name,
-                    std::time::Duration::from_secs(60),
-                    progress_bar,
-                )?;
+                run_ephemeral_ssh::wait_for_ssh_ready(&opts.container_name, None, progress_bar)?;
 
                 ssh::connect_via_container(&opts.container_name, opts.args)
             }
