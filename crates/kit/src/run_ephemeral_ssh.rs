@@ -11,6 +11,9 @@ use crate::run_ephemeral::{run_detached, RunEphemeralOpts};
 use crate::ssh;
 use crate::supervisor_status::{SupervisorState, SupervisorStatus};
 
+/// Timeout waiting for connection
+pub(crate) const SSH_TIMEOUT: std::time::Duration = const { Duration::from_secs(240) };
+
 #[derive(Debug, clap::Parser, serde::Serialize, serde::Deserialize)]
 pub struct RunEphemeralSshOpts {
     #[command(flatten)]
@@ -28,9 +31,11 @@ pub struct RunEphemeralSshOpts {
 /// Returns Ok(false) if we don't support systemd status notifications.
 pub fn wait_for_vm_ssh(
     container_name: &str,
-    timeout: Duration,
+    timeout: Option<Duration>,
     progress: ProgressBar,
 ) -> Result<(bool, ProgressBar)> {
+    let timeout = timeout.unwrap_or(SSH_TIMEOUT);
+
     debug!(
         "Waiting for VM readiness via supervisor status file (timeout: {}s)...",
         timeout.as_secs()
@@ -103,15 +108,13 @@ pub fn wait_for_vm_ssh(
 /// This is used as a fallback when systemd notification is not available.
 pub fn wait_for_ssh_ready(
     container_name: &str,
-    timeout: Duration,
+    timeout: Option<Duration>,
     progress: ProgressBar,
 ) -> Result<ProgressBar> {
-    let (_, progress) = wait_for_vm_ssh(container_name, timeout, progress)?;
+    let timeout = timeout.unwrap_or(SSH_TIMEOUT);
+    let (_, progress) = wait_for_vm_ssh(container_name, Some(timeout), progress)?;
 
-    debug!(
-        "Polling SSH connectivity (timeout: {}s)...",
-        timeout.as_secs()
-    );
+    debug!("Polling SSH connectivity...",);
     let start_time = Instant::now();
 
     // Use SSH options optimized for connectivity testing
@@ -162,7 +165,7 @@ pub fn run_ephemeral_ssh(opts: RunEphemeralSshOpts) -> Result<()> {
     debug!("Using container ID: {}", container_name);
 
     let progress_bar = crate::boot_progress::create_boot_progress_bar();
-    let progress_bar = wait_for_ssh_ready(&container_name, Duration::from_secs(60), progress_bar)?;
+    let progress_bar = wait_for_ssh_ready(&container_name, None, progress_bar)?;
     progress_bar.finish_and_clear();
 
     // Execute SSH connection directly (no thread needed for this)

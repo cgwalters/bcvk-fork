@@ -432,11 +432,7 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
     let result = (|| -> Result<()> {
         // Wait for SSH to be ready
         let progress_bar = crate::boot_progress::create_boot_progress_bar();
-        let progress_bar = wait_for_ssh_ready(
-            &container_id,
-            std::time::Duration::from_secs(60),
-            progress_bar,
-        )?;
+        let progress_bar = wait_for_ssh_ready(&container_id, None, progress_bar)?;
         progress_bar.finish_and_clear();
 
         // Connect via SSH and execute the installation command
