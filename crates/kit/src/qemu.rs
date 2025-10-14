@@ -693,6 +693,56 @@ pub struct RunningQemu {
 impl RunningQemu {
     /// Spawn QEMU
     pub async fn spawn(mut config: QemuConfig) -> Result<Self> {
+        // Spawn all virtiofsd processes first
+        let mut awaiting_virtiofsd = Vec::new();
+        let virtiofsd_configs = config
+            .main_virtiofs_config
+            .iter()
+            .chain(config.virtiofs_configs.iter());
+        for config in virtiofsd_configs {
+            let process = spawn_virtiofsd_async(config).await?;
+            awaiting_virtiofsd.push((process, config.socket_path.clone()));
+        }
+
+        // Wait for all virtiofsd to be ready
+        let mut virtiofsd_processes = Vec::new();
+        while let Some((proc, socket_path)) = awaiting_virtiofsd.pop() {
+            let socket_path = &socket_path;
+            let query_exists = async move {
+                loop {
+                    if socket_path.exists() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            };
+            tokio::pin!(query_exists);
+            let timeout_val = Duration::from_secs(60);
+            let timeout = tokio::time::sleep(timeout_val);
+            tokio::pin!(timeout);
+            debug!("Waiting for socket at {socket_path}");
+            let mut output: Pin<Box<dyn Future<Output = std::io::Result<Output>>>> =
+                Box::pin(proc.wait_with_output());
+            tokio::select! {
+                output = &mut output => {
+                    tracing::trace!("virtiofsd exited");
+                    let output = output?;
+                    let status = output.status;
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(eyre!(
+                        "virtiofsd failed to start for socket {socket_path}\nExit status: {status:?}\nOutput: {stderr}"
+                    ));
+                }
+                _ = timeout => {
+                    return Err(eyre!("timed out waiting for virtiofsd socket {} to be created (waited {timeout_val:?})", socket_path));
+                }
+                _ = query_exists => {
+                }
+            }
+            virtiofsd_processes.push(output);
+            tracing::debug!("virtiofsd socket created: {socket_path}");
+        }
+
         let vsockdata = if let Some(vhost_fd) = config.vhost_fd.take() {
             // Get a unique guest CID using dynamic allocation
             // If /dev/vhost-vsock is not available, fall back to disabled vsock
@@ -793,56 +843,6 @@ impl RunningQemu {
             })
             .unwrap_or_default();
 
-        // Spawn all virtiofsd processes first
-        let mut awaiting_virtiofsd = Vec::new();
-        let virtiofsd_configs = config
-            .main_virtiofs_config
-            .iter()
-            .chain(config.virtiofs_configs.iter());
-        for config in virtiofsd_configs {
-            let process = spawn_virtiofsd_async(config).await?;
-            awaiting_virtiofsd.push((process, config.socket_path.clone()));
-        }
-
-        // Wait for all virtiofsd to be ready
-        let mut virtiofsd_processes = Vec::new();
-        while let Some((proc, socket_path)) = awaiting_virtiofsd.pop() {
-            let socket_path = &socket_path;
-            let query_exists = async move {
-                loop {
-                    if socket_path.exists() {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            };
-            tokio::pin!(query_exists);
-            let timeout_val = Duration::from_secs(60);
-            let timeout = tokio::time::sleep(timeout_val);
-            tokio::pin!(timeout);
-            debug!("Waiting for socket at {socket_path}");
-            let mut output: Pin<Box<dyn Future<Output = std::io::Result<Output>>>> =
-                Box::pin(proc.wait_with_output());
-            tokio::select! {
-                output = &mut output => {
-                    tracing::trace!("virtiofsd exited");
-                    let output = output?;
-                    let status = output.status;
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    tracing::trace!("returnign spawn error");
-                    return Err(eyre!(
-                        "virtiofsd failed to start for socket {socket_path}\nExit status: {status:?}\nOutput: {stderr}"
-                    ));
-                }
-                _ = timeout => {
-                    return Err(eyre!("timed out waiting for virtiofsd socket {} to be created (waited {timeout_val:?})", socket_path));
-                }
-                _ = query_exists => {
-                }
-            }
-            virtiofsd_processes.push(output);
-            tracing::debug!("virtiofsd socket created: {socket_path}");
-        }
         // Spawn QEMU process with additional VSOCK credential if needed
         let qemu_process = spawn(&config, &creds, vsockdata)?;
 
