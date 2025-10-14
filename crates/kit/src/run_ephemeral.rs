@@ -989,6 +989,7 @@ StandardOutput=file:/dev/virtio-ports/executestatus
     let mut kernel_cmdline = vec![
         "rootfstype=virtiofs".to_string(),
         "root=rootfs".to_string(),
+        "rootflags=ro".to_string(),
         "selinux=0".to_string(),
         "systemd.volatile=overlay".to_string(),
     ];
