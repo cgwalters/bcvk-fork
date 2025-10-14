@@ -889,6 +889,23 @@ impl Default for VirtiofsConfig {
     }
 }
 
+/// Check if virtiofsd supports the --readonly flag.
+async fn virtiofsd_supports_readonly(virtiofsd_binary: &str) -> bool {
+    let output = tokio::process::Command::new(virtiofsd_binary)
+        .arg("--help")
+        .output()
+        .await;
+
+    match output {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            stdout.contains("--readonly") || stderr.contains("--readonly")
+        }
+        Err(_) => false,
+    }
+}
+
 /// Spawn virtiofsd daemon process as tokio::process::Child.
 /// Searches for binary in /usr/libexec, /usr/bin, /usr/local/bin.
 /// Creates socket directory if needed, redirects output unless debug=true.
@@ -913,6 +930,13 @@ pub async fn spawn_virtiofsd_async(config: &VirtiofsConfig) -> Result<tokio::pro
             )
         })?;
 
+    // Check if virtiofsd supports --readonly flag
+    let supports_readonly = virtiofsd_supports_readonly(virtiofsd_binary).await;
+    debug!(
+        "virtiofsd at {} supports --readonly: {}",
+        virtiofsd_binary, supports_readonly
+    );
+
     let mut cmd = tokio::process::Command::new(virtiofsd_binary);
     // SAFETY: This API is safe to call in a forked child.
     unsafe {
@@ -931,6 +955,11 @@ pub async fn spawn_virtiofsd_async(config: &VirtiofsConfig) -> Result<tokio::pro
         // We always run in a container
         "--sandbox=none",
     ]);
+
+    // Only add --readonly if supported
+    if supports_readonly {
+        cmd.arg("--readonly");
+    }
 
     // https://gitlab.com/virtio-fs/virtiofsd/-/issues/17 - this is the new default,
     // but we want to be compatible with older virtiofsd too.
