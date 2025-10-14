@@ -123,10 +123,6 @@ This design allows bcvk to provide VM-like isolation and boot behavior while lev
 
     Directory with systemd units to inject (expects system/ subdirectory)
 
-**--log-cmdline**
-
-    Log full podman command before execution
-
 **--bind-storage-ro**
 
     Mount host container storage (RO) at /run/virtiofs-mnt-hoststorage
