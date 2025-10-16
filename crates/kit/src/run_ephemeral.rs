@@ -146,6 +146,9 @@ pub struct CommonPodmanOptions {
     #[clap(long = "name", help = "Assign a name to the container")]
     pub name: Option<String>,
 
+    #[clap(long = "network", help = "Configure the network for the container")]
+    pub network: Option<String>,
+
     #[clap(
         long = "label",
         help = "Add metadata to the container in key=value form"
@@ -164,12 +167,6 @@ pub struct CommonVmOpts {
 
     #[clap(long = "karg", help = "Additional kernel command line arguments")]
     pub kernel_args: Vec<String>,
-
-    #[clap(
-        long,
-        help = "Network configuration (none, user, bridge=name) [default: none]"
-    )]
-    pub net: Option<String>,
 
     #[clap(long, help = "Enable console output to terminal for debugging")]
     pub console: bool,
@@ -210,11 +207,6 @@ impl CommonVmOpts {
     /// Get vCPU count
     pub fn vcpus(&self) -> u32 {
         self.vcpus.unwrap_or_else(default_vcpus)
-    }
-
-    /// Get network config (default: "none")
-    pub fn net_string(&self) -> String {
-        self.net.clone().unwrap_or_else(|| "none".to_string())
     }
 }
 
@@ -380,19 +372,19 @@ fn prepare_run_command_with_temp(
     for label in opts.podman.label.iter() {
         cmd.arg(format!("--label={label}"));
     }
-    cmd.arg(format!("--net={}", opts.common.net_string().as_str()));
 
-    // Add container name if specified
+    // Propagate all podman arguments
     if let Some(ref name) = opts.podman.name {
         cmd.args(["--name", name]);
     }
-
-    // Add --rm flag based on user input (default: true)
+    // Note that (unlike the libvirt flow) we rely on the default bridge network to avoid
+    // port conflicts
+    if let Some(network) = opts.podman.network.as_deref() {
+        cmd.args(["--network", network]);
+    }
     if opts.podman.rm {
         cmd.arg("--rm");
     }
-
-    // Add -t, -i, -d flags based on user input (mirror podman behavior)
     if opts.podman.tty {
         cmd.arg("-t");
     }

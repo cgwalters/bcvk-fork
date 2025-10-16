@@ -220,7 +220,6 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtUploadOpts
                 memory: opts.memory.clone(),
                 vcpus: opts.vcpus,
                 kernel_args: opts.karg.clone(),
-                net: Some("none".to_string()),
                 ..Default::default()
             },
             ..Default::default()

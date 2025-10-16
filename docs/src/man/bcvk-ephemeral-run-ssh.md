@@ -37,10 +37,6 @@ Run ephemeral VM and SSH into it
 
     Additional kernel command line arguments
 
-**--net**=*NET*
-
-    Network configuration (none, user, bridge=name) [default: none]
-
 **--console**
 
     Enable console output to terminal for debugging
@@ -80,6 +76,10 @@ Run ephemeral VM and SSH into it
 **--name**=*NAME*
 
     Assign a name to the container
+
+**--network**=*NETWORK*
+
+    Configure the network for the container
 
 **--label**=*LABEL*
 
