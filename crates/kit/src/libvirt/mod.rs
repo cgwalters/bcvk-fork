@@ -20,9 +20,6 @@ pub enum OutputFormat {
 /// Default memory allocation for libvirt VMs
 pub const LIBVIRT_DEFAULT_MEMORY: &str = "4G";
 
-/// Default vCPU count for libvirt VMs
-pub const LIBVIRT_DEFAULT_VCPUS: u32 = 2;
-
 /// Default disk size for libvirt base disks
 pub const LIBVIRT_DEFAULT_DISK_SIZE: &str = "20G";
 
