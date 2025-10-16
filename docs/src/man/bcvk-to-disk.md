@@ -79,10 +79,6 @@ The installation process:
 
     Additional kernel command line arguments
 
-**--net**=*NET*
-
-    Network configuration (none, user, bridge=name) [default: none]
-
 **--console**
 
     Enable console output to terminal for debugging

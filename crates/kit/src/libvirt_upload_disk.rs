@@ -291,7 +291,6 @@ pub fn run(opts: LibvirtUploadDiskOpts) -> Result<()> {
                 memory: opts.memory.clone(),
                 vcpus: opts.vcpus,
                 kernel_args: opts.karg.clone(),
-                net: Some("none".to_string()),
                 ..Default::default()
             },
             ..Default::default()
