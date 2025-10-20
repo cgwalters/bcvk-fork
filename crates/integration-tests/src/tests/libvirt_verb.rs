@@ -356,6 +356,8 @@ pub fn test_libvirt_run_ssh_full_workflow() {
         LIBVIRT_INTEGRATION_TEST_LABEL,
         "--filesystem",
         "ext4",
+        "--karg",
+        "bcvk.test-install-karg=1",
         &test_image,
     ])
     .expect("Failed to run libvirt run with SSH");
@@ -375,9 +377,9 @@ pub fn test_libvirt_run_ssh_full_workflow() {
     println!("Waiting for VM to boot and SSH to become available...");
     std::thread::sleep(std::time::Duration::from_secs(30));
 
-    // Test SSH connection with simple command
-    println!("Testing SSH connection: echo 'hello world'");
-    let ssh_output = run_bcvk(&["libvirt", "ssh", &domain_name, "--", "echo", "hello world"])
+    // Test SSH connection and read kernel command line
+    println!("Testing SSH connection and validating karg");
+    let ssh_output = run_bcvk(&["libvirt", "ssh", &domain_name, "--", "cat", "/proc/cmdline"])
         .expect("Failed to run libvirt ssh command");
 
     println!("SSH stdout: {}", ssh_output.stdout);
@@ -388,17 +390,19 @@ pub fn test_libvirt_run_ssh_full_workflow() {
 
     // Check SSH results
     if !ssh_output.success() {
-        panic!("SSH connection failed: {}", ssh_output.stderr);
+        panic!(
+            "SSH connection failed: {}\nkernel cmdline: {}",
+            ssh_output.stderr, ssh_output.stdout
+        );
     }
 
-    // Verify we got the expected output
+    // Verify we got the expected karg in /proc/cmdline
     assert!(
-        ssh_output.stdout.contains("hello world"),
-        "Expected 'hello world' in SSH output. Got: {}",
+        ssh_output.stdout.contains("bcvk.test-install-karg=1"),
+        "Expected bcvk.test-install-karg=1 in kernel cmdline.\nActual cmdline: {}",
         ssh_output.stdout
     );
 
-    println!("✓ Successfully executed 'echo hello world' via SSH");
     println!("✓ Full libvirt run + SSH workflow test passed");
 }
 

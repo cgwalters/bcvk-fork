@@ -59,10 +59,6 @@ This design allows bcvk to provide VM-like isolation and boot behavior while lev
 
     Number of vCPUs
 
-**--karg**=*KERNEL_ARGS*
-
-    Additional kernel command line arguments
-
 **--console**
 
     Enable console output to terminal for debugging
@@ -134,6 +130,10 @@ This design allows bcvk to provide VM-like isolation and boot behavior while lev
 **--mount-disk-file**=*FILE[:NAME]*
 
     Mount disk file as virtio-blk device at /dev/disk/by-id/virtio-<name>
+
+**--karg**=*KERNEL_ARGS*
+
+    Additional kernel command line arguments
 
 <!-- END GENERATED OPTIONS -->
 

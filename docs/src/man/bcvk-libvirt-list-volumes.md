@@ -21,7 +21,7 @@ List available bootc volumes with metadata
 
 **--json**
 
-    Output as structured JSON instead of table format
+    Output format (human-readable or JSON)
 
 **--detailed**
 

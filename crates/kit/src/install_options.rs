@@ -29,6 +29,10 @@ pub struct InstallOptions {
     )]
     pub storage_path: Option<Utf8PathBuf>,
 
+    #[clap(long)]
+    /// Set a kernel argument
+    pub karg: Vec<String>,
+
     /// Default to composefs-native storage
     #[clap(long)]
     pub composefs_native: bool,
@@ -47,6 +51,10 @@ impl InstallOptions {
         if let Some(ref root_size) = self.root_size {
             args.push("--root-size".to_string());
             args.push(root_size.clone());
+        }
+
+        for k in self.karg.iter() {
+            args.push(format!("--karg={k}"));
         }
 
         if self.composefs_native {

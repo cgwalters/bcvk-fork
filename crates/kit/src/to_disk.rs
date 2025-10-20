@@ -310,7 +310,6 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
             opts.target_disk.as_std_path(),
             &image_digest,
             &opts.install,
-            &opts.additional.common.kernel_args,
         )? {
             Ok(()) => {
                 println!(
@@ -421,6 +420,7 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
             opts.target_disk,
             opts.additional.format.as_str()
         )], // Attach target disk
+        kernel_args: Default::default(),
     };
 
     // Phase 5: SSH-based VM configuration and execution
@@ -475,7 +475,6 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
                 &opts.source_image,
                 &opts.target_disk,
                 &opts.install,
-                &opts.additional.common.kernel_args,
                 &opts.additional.format,
             );
             if let Err(e) = write_result {
@@ -496,7 +495,6 @@ fn write_disk_metadata(
     source_image: &str,
     target_disk: &Utf8PathBuf,
     install_options: &InstallOptions,
-    kernel_args: &[String],
     format: &Format,
 ) -> Result<()> {
     // Note: xattrs work on regular files including raw and qcow2 images
@@ -507,7 +505,7 @@ fn write_disk_metadata(
     let digest = inspect.digest.to_string();
 
     // Prepare metadata using the new helper method
-    let metadata = DiskImageMetadata::from(install_options, &digest, kernel_args);
+    let metadata = DiskImageMetadata::from(install_options, &digest);
 
     // Write metadata using rustix fsetxattr
     let file = std::fs::OpenOptions::new()

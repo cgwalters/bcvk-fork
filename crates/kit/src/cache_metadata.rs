@@ -153,13 +153,13 @@ impl DiskImageMetadata {
 
 impl DiskImageMetadata {
     /// Create new metadata from InstallOptions and image digest
-    pub fn from(options: &InstallOptions, image: &str, kernel_args: &[String]) -> Self {
+    pub fn from(options: &InstallOptions, image: &str) -> Self {
         Self {
             version: 1,
             digest: image.to_owned(),
             filesystem: options.filesystem.clone(),
             root_size: options.root_size.clone(),
-            kernel_args: kernel_args.to_vec(),
+            kernel_args: options.karg.clone(),
             composefs_native: options.composefs_native,
         }
     }
@@ -180,7 +180,6 @@ pub fn check_cached_disk(
     path: &Path,
     image_digest: &str,
     install_options: &InstallOptions,
-    kernel_args: &[String],
 ) -> Result<Result<(), ValidationError>> {
     if !path.exists() {
         tracing::debug!("Disk image {:?} does not exist", path);
@@ -188,7 +187,7 @@ pub fn check_cached_disk(
     }
 
     // Create metadata for the current request to compute expected hash
-    let expected_meta = DiskImageMetadata::from(install_options, image_digest, kernel_args);
+    let expected_meta = DiskImageMetadata::from(install_options, image_digest);
     let expected_hash = expected_meta.compute_cache_hash();
 
     // Read the cache hash from the disk image
@@ -241,26 +240,16 @@ mod tests {
         let install_options1 = InstallOptions {
             filesystem: Some("ext4".to_string()),
             root_size: Some("20G".to_string()),
-            storage_path: None,
-            composefs_native: false,
+            ..Default::default()
         };
-        let metadata1 = DiskImageMetadata::from(
-            &install_options1,
-            "sha256:abc123",
-            &["console=ttyS0".to_string()],
-        );
+        let metadata1 = DiskImageMetadata::from(&install_options1, "sha256:abc123");
 
         let install_options2 = InstallOptions {
             filesystem: Some("ext4".to_string()),
             root_size: Some("20G".to_string()),
-            storage_path: None,
-            composefs_native: false,
+            ..Default::default()
         };
-        let metadata2 = DiskImageMetadata::from(
-            &install_options2,
-            "sha256:abc123",
-            &["console=ttyS0".to_string()],
-        );
+        let metadata2 = DiskImageMetadata::from(&install_options2, "sha256:abc123");
 
         // Same inputs should generate same hash
         assert_eq!(
@@ -272,14 +261,9 @@ mod tests {
         let install_options3 = InstallOptions {
             filesystem: Some("ext4".to_string()),
             root_size: Some("20G".to_string()),
-            storage_path: None,
-            composefs_native: false,
+            ..Default::default()
         };
-        let metadata3 = DiskImageMetadata::from(
-            &install_options3,
-            "sha256:xyz789",
-            &["console=ttyS0".to_string()],
-        );
+        let metadata3 = DiskImageMetadata::from(&install_options3, "sha256:xyz789");
 
         assert_ne!(
             metadata1.compute_cache_hash(),
@@ -290,14 +274,9 @@ mod tests {
         let install_options4 = InstallOptions {
             filesystem: Some("xfs".to_string()),
             root_size: Some("20G".to_string()),
-            storage_path: None,
-            composefs_native: false,
+            ..Default::default()
         };
-        let metadata4 = DiskImageMetadata::from(
-            &install_options4,
-            "sha256:abc123",
-            &["console=ttyS0".to_string()],
-        );
+        let metadata4 = DiskImageMetadata::from(&install_options4, "sha256:abc123");
 
         assert_ne!(
             metadata1.compute_cache_hash(),

@@ -42,10 +42,6 @@ pub struct LibvirtUploadOpts {
     /// Number of vCPUs for installation VM
     #[clap(long)]
     pub vcpus: Option<u32>,
-
-    /// Additional kernel arguments for installation
-    #[clap(long)]
-    pub karg: Vec<String>,
 }
 
 impl LibvirtUploadOpts {
@@ -219,7 +215,6 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtUploadOpts
             common: crate::run_ephemeral::CommonVmOpts {
                 memory: opts.memory.clone(),
                 vcpus: opts.vcpus,
-                kernel_args: opts.karg.clone(),
                 ..Default::default()
             },
             ..Default::default()

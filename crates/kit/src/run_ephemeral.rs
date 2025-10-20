@@ -165,9 +165,6 @@ pub struct CommonVmOpts {
     #[clap(long, help = "Number of vCPUs")]
     pub vcpus: Option<u32>,
 
-    #[clap(long = "karg", help = "Additional kernel command line arguments")]
-    pub kernel_args: Vec<String>,
-
     #[clap(long, help = "Enable console output to terminal for debugging")]
     pub console: bool,
 
@@ -257,6 +254,9 @@ pub struct RunEphemeralOpts {
         help = "Mount disk file as virtio-blk device at /dev/disk/by-id/virtio-<name>"
     )]
     pub mount_disk_files: Vec<String>,
+
+    #[clap(long = "karg", help = "Additional kernel command line arguments")]
+    pub kernel_args: Vec<String>,
 }
 
 /// Launch privileged container with QEMU+KVM for ephemeral VM, spawning as subprocess.
@@ -982,7 +982,7 @@ StandardOutput=file:/dev/virtio-ports/executestatus
         kernel_cmdline.push("ds=iid-datasource-none".to_string());
     }
 
-    kernel_cmdline.extend(opts.common.kernel_args.clone());
+    kernel_cmdline.extend(opts.kernel_args.clone());
 
     // TODO allocate unlinked unnamed file and pass via fd
     let mut tmp_swapfile = None;
