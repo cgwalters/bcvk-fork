@@ -353,13 +353,14 @@ impl DomainBuilder {
             }
         }
 
-        // Serial console
-        writer.start_element("serial", &[("type", "pty")])?;
-        writer.write_empty_element("target", &[("port", "0")])?;
-        writer.end_element("serial")?;
-
+        // Serial console, see https://libvirt.org/formatdomain.html#relationship-between-serial-ports-and-consoles
+        // We allocate a platform-specific default for early console stuff like bootloaders,
+        // and a platform-independent `hvc0` that can be referenced independently.
         writer.start_element("console", &[("type", "pty")])?;
-        writer.write_empty_element("target", &[("type", "serial"), ("port", "0")])?;
+        writer.write_empty_element("target", &[("type", "serial")])?;
+        writer.end_element("console")?;
+        writer.start_element("console", &[("type", "pty")])?;
+        writer.write_empty_element("target", &[("type", "virtio")])?;
         writer.end_element("console")?;
 
         // VNC graphics if enabled

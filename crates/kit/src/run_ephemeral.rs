@@ -973,7 +973,7 @@ StandardOutput=file:/dev/virtio-ports/executestatus
     ];
 
     if opts.common.console {
-        kernel_cmdline.push("console=ttyS0".to_string());
+        kernel_cmdline.push("console=hvc0".to_string());
     }
     if cloudinit {
         // We don't provide any cloud-init datasource right now,
