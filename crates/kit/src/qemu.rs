@@ -561,33 +561,31 @@ fn spawn(
         ]);
     }
 
+    // Add virtio-serial controller - always needed for console
+    cmd.args(["-device", "virtio-serial"]);
+
     // Add virtio-serial devices
-    if !config.virtio_serial_devices.is_empty() {
-        // Add the virtio-serial controller
-        cmd.args(["-device", "virtio-serial"]);
+    for (idx, serial_device) in config.virtio_serial_devices.iter().enumerate() {
+        let char_id = format!("serial_char{}", idx);
+        // Build chardev args with optional append
+        let chardev_args = if serial_device.append {
+            format!(
+                "file,id={},path={},append=on",
+                char_id, serial_device.output_file
+            )
+        } else {
+            format!("file,id={},path={}", char_id, serial_device.output_file)
+        };
 
-        for (idx, serial_device) in config.virtio_serial_devices.iter().enumerate() {
-            let char_id = format!("serial_char{}", idx);
-            // Build chardev args with optional append
-            let chardev_args = if serial_device.append {
-                format!(
-                    "file,id={},path={},append=on",
-                    char_id, serial_device.output_file
-                )
-            } else {
-                format!("file,id={},path={}", char_id, serial_device.output_file)
-            };
-
-            cmd.args([
-                "-chardev",
-                &chardev_args,
-                "-device",
-                &format!(
-                    "virtserialport,chardev={},name={}",
-                    char_id, serial_device.name
-                ),
-            ]);
-        }
+        cmd.args([
+            "-chardev",
+            &chardev_args,
+            "-device",
+            &format!(
+                "virtserialport,chardev={},name={}",
+                char_id, serial_device.name
+            ),
+        ]);
     }
 
     // Configure network (only User mode supported now)
@@ -612,13 +610,19 @@ fn spawn(
         }
     }
 
-    // Configure display and console (only None and Console modes supported now)
+    // No GUI, and no emulated serial ports by default.
+    cmd.args(["-serial", "none", "-nographic", "-display", "none"]);
+
     match &config.display_mode {
         DisplayMode::None => {
-            cmd.args(["-nographic"]);
+            // Disable monitor in non-console mode
+            cmd.args(["-monitor", "none"]);
         }
         DisplayMode::Console => {
-            cmd.args(["-serial", "stdio", "-display", "none"]);
+            cmd.args(["-device", "virtconsole,chardev=console0"]);
+            cmd.args(["-chardev", "stdio,id=console0,mux=on"]);
+            // Use monitor on the same muxed chardev
+            cmd.args(["-monitor", "chardev:console0"]);
         }
     }
 
