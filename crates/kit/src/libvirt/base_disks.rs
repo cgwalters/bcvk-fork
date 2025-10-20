@@ -17,10 +17,9 @@ pub fn find_or_create_base_disk(
     source_image: &str,
     image_digest: &str,
     install_options: &InstallOptions,
-    kernel_args: &[String],
     connect_uri: Option<&str>,
 ) -> Result<Utf8PathBuf> {
-    let metadata = DiskImageMetadata::from(install_options, image_digest, kernel_args);
+    let metadata = DiskImageMetadata::from(install_options, image_digest);
     let cache_hash = metadata.compute_cache_hash();
 
     // Extract short hash for filename (first 16 chars after "sha256:")
@@ -45,7 +44,6 @@ pub fn find_or_create_base_disk(
             base_disk_path.as_std_path(),
             image_digest,
             install_options,
-            kernel_args,
         )?
         .is_ok()
         {
@@ -68,7 +66,6 @@ pub fn find_or_create_base_disk(
         source_image,
         image_digest,
         install_options,
-        kernel_args,
         connect_uri,
     )?;
 
@@ -81,7 +78,6 @@ fn create_base_disk(
     source_image: &str,
     image_digest: &str,
     install_options: &InstallOptions,
-    kernel_args: &[String],
     connect_uri: Option<&str>,
 ) -> Result<()> {
     use crate::run_ephemeral::CommonVmOpts;
@@ -136,7 +132,6 @@ fn create_base_disk(
         temp_disk_path.as_std_path(),
         image_digest,
         install_options,
-        kernel_args,
     )
     .context("Querying cached disk")?;
 

@@ -47,6 +47,10 @@ The installation process:
 
     Path to host container storage (auto-detected if not specified)
 
+**--karg**=*KARG*
+
+    Set a kernel argument
+
 **--composefs-native**
 
     Default to composefs-native storage
@@ -74,10 +78,6 @@ The installation process:
 **--vcpus**=*VCPUS*
 
     Number of vCPUs
-
-**--karg**=*KERNEL_ARGS*
-
-    Additional kernel command line arguments
 
 **--console**
 

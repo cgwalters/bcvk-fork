@@ -44,10 +44,6 @@ pub struct LibvirtUploadDiskOpts {
     #[clap(long)]
     pub vcpus: Option<u32>,
 
-    /// Additional kernel arguments for installation
-    #[clap(long)]
-    pub karg: Vec<String>,
-
     /// Skip uploading to libvirt (useful for testing)
     #[clap(long)]
     pub skip_upload: bool,
@@ -290,7 +286,6 @@ pub fn run(opts: LibvirtUploadDiskOpts) -> Result<()> {
             common: crate::run_ephemeral::CommonVmOpts {
                 memory: opts.memory.clone(),
                 vcpus: opts.vcpus,
-                kernel_args: opts.karg.clone(),
                 ..Default::default()
             },
             ..Default::default()

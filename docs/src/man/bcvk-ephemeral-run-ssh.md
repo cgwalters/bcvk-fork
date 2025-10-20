@@ -33,10 +33,6 @@ Run ephemeral VM and SSH into it
 
     Number of vCPUs
 
-**--karg**=*KERNEL_ARGS*
-
-    Additional kernel command line arguments
-
 **--console**
 
     Enable console output to terminal for debugging
@@ -108,6 +104,10 @@ Run ephemeral VM and SSH into it
 **--mount-disk-file**=*FILE[:NAME]*
 
     Mount disk file as virtio-blk device at /dev/disk/by-id/virtio-<name>
+
+**--karg**=*KERNEL_ARGS*
+
+    Additional kernel command line arguments
 
 <!-- END GENERATED OPTIONS -->
 

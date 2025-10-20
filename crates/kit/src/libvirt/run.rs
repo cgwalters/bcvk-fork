@@ -179,7 +179,6 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
         &opts.image,
         &image_digest,
         &opts.install,
-        &[], // kernel_args
         connect_uri,
     )
     .with_context(|| "Failed to find or create base disk")?;

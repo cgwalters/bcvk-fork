@@ -45,6 +45,10 @@ Upload bootc disk images to libvirt with metadata annotations
 
     Path to host container storage (auto-detected if not specified)
 
+**--karg**=*KARG*
+
+    Set a kernel argument
+
 **--composefs-native**
 
     Default to composefs-native storage
@@ -58,10 +62,6 @@ Upload bootc disk images to libvirt with metadata annotations
 **--vcpus**=*VCPUS*
 
     Number of vCPUs for installation VM
-
-**--karg**=*KARG*
-
-    Additional kernel arguments for installation
 
 <!-- END GENERATED OPTIONS -->
 

@@ -53,6 +53,10 @@ Run a bootable container as a persistent VM
 
     Path to host container storage (auto-detected if not specified)
 
+**--karg**=*KARG*
+
+    Set a kernel argument
+
 **--composefs-native**
 
     Default to composefs-native storage
