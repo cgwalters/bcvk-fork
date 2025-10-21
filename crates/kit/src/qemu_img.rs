@@ -10,13 +10,21 @@ use std::process::Command;
 #[serde(rename_all = "kebab-case")]
 #[allow(dead_code)]
 pub struct QemuImgInfo {
+    /// Virtual size of the disk image in bytes
     pub virtual_size: u64,
+    /// Path to the disk image file
     pub filename: String,
+    /// Image format (e.g., "qcow2", "raw")
     pub format: String,
+    /// Actual size on disk in bytes (if available)
     pub actual_size: Option<u64>,
+    /// Cluster size in bytes (for formats like qcow2)
     pub cluster_size: Option<u64>,
+    /// Backing file name (if this is a snapshot)
     pub backing_filename: Option<String>,
+    /// Full path to backing file (if this is a snapshot)
     pub full_backing_filename: Option<String>,
+    /// Whether the image is marked as dirty
     pub dirty_flag: Option<bool>,
 }
 

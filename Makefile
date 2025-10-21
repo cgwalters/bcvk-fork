@@ -36,6 +36,19 @@ manpages: sync-cli-options $(MAN8_TARGETS)
 sync-cli-options:
 	@cargo xtask sync-manpages >/dev/null 2>&1 || true
 
+# This gates CI by default. Note that for clippy, we gate on
+# only the clippy correctness and suspicious lints, plus a select
+# set of default rustc warnings.
+# We intentionally don't gate on this for local builds in cargo.toml
+# because it impedes iteration speed.
+CLIPPY_CONFIG = -A clippy::all -D clippy::correctness -D clippy::suspicious -D clippy::disallowed-methods -Dunused_imports -Ddead_code
+validate:
+	cargo fmt -- --check -l
+	cargo test --no-run --workspace
+	cargo clippy -- $(CLIPPY_CONFIG)
+	env RUSTDOCFLAGS='-D warnings' cargo doc --lib
+.PHONY: validate
+
 install:
 	install -D -m 0755 -t $(DESTDIR)$(prefix)/bin target/release/bcvk
 	if [ -n "$(MAN8_TARGETS)" ]; then \

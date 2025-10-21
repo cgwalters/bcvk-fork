@@ -1,3 +1,7 @@
+//! Cleanup utility for integration test resources
+//!
+//! This binary removes integration test containers and libvirt VMs that were created during testing.
+
 use std::process::Command;
 
 // Import shared constants from the library

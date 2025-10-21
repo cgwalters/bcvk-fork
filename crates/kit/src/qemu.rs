@@ -360,6 +360,8 @@ fn allocate_vsock_cid(vhost_fd: File) -> Result<(OwnedFd, u32)> {
         const VHOST_VSOCK_SET_GUEST_CID: libc::c_ulong = 0x4008af60;
 
         let cid = candidate_cid as u64;
+        // SAFETY: ioctl is unsafe but we're passing valid file descriptor and pointer
+        #[allow(unsafe_code)]
         let result = unsafe {
             match libc::ioctl(
                 vhost_fd.as_raw_fd(),
@@ -409,6 +411,7 @@ fn spawn(
 
     let mut cmd = Command::new(qemu);
     // SAFETY: This API is safe to call in a forked child.
+    #[allow(unsafe_code)]
     unsafe {
         cmd.pre_exec(|| {
             rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::TERM))
@@ -968,6 +971,7 @@ pub async fn spawn_virtiofsd_async(config: &VirtiofsConfig) -> Result<tokio::pro
 
     let mut cmd = tokio::process::Command::new(virtiofsd_binary);
     // SAFETY: This API is safe to call in a forked child.
+    #[allow(unsafe_code)]
     unsafe {
         cmd.pre_exec(|| {
             rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::TERM))

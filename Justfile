@@ -2,10 +2,9 @@
 build:
    make
 
-# Quick checks
-check:
-    cargo t --workspace --no-run
-    cargo fmt --check
+# Static checks
+validate:
+    make validate
 
 # Run unit tests (excludes integration tests)
 unit *ARGS:

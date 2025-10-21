@@ -21,6 +21,7 @@ unused_must_use = "forbid"
 missing_docs = "deny"
 missing_debug_implementations = "deny"
 # Feel free to comment this one out locally during development of a patch.
+unused_imports = "deny"
 dead_code = "deny"
 
 [workspace.lints.clippy]
