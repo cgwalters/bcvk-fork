@@ -1,3 +1,5 @@
+//! Integration tests for bcvk
+
 use camino::Utf8Path;
 use std::process::Output;
 

@@ -49,6 +49,8 @@ pub fn wait_for_vm_ssh(
         "/var/lib/bcvk/entrypoint",
         "monitor-status",
     ]);
+    // SAFETY: This API is safe to call in a forked child.
+    #[allow(unsafe_code)]
     unsafe {
         cmd.pre_exec(|| {
             rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::TERM))

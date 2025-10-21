@@ -344,8 +344,6 @@ impl LibvirtListVolumesOpts {
     }
 }
 
-/// Extract value from XML element (simple string parsing)
-
 /// Parse virsh size format (e.g., "5.00 GiB") to bytes
 fn parse_virsh_size(size_str: &str) -> Option<u64> {
     let parts: Vec<&str> = size_str.split_whitespace().collect();

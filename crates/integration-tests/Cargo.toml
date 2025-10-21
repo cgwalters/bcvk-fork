@@ -33,3 +33,6 @@ uuid = { version = "1.18.1", features = ["v4"] }
 camino = "1.1.12"
 regex = "1"
 linkme = "0.3.30"
+
+[lints]
+workspace = true

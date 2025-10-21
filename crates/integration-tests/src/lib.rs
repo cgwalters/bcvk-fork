@@ -20,11 +20,14 @@ pub type TestFn = fn() -> color_eyre::Result<()>;
 /// Metadata for a registered integration test
 #[derive(Debug)]
 pub struct IntegrationTest {
+    /// Name of the integration test
     pub name: &'static str,
+    /// Test function to execute
     pub f: TestFn,
 }
 
 impl IntegrationTest {
+    /// Create a new integration test with the given name and function
     pub const fn new(name: &'static str, f: TestFn) -> Self {
         Self { name, f }
     }

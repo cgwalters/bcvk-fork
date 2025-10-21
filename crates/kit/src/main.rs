@@ -1,3 +1,5 @@
+//! Bootc Virtualization Kit (bcvk) - A toolkit for bootc containers and local virtualization
+
 use std::ffi::OsString;
 
 use cap_std_ext::cap_std::fs::Dir;
@@ -36,6 +38,7 @@ mod to_disk;
 mod utils;
 mod xml_utils;
 
+/// Default state directory for bcvk container data
 pub const CONTAINER_STATEDIR: &str = "/var/lib/bcvk";
 
 /// A comprehensive toolkit for bootc containers and local virtualization.

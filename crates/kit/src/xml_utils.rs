@@ -15,6 +15,12 @@ pub struct XmlWriter {
     writer: Writer<Cursor<Vec<u8>>>,
 }
 
+impl std::fmt::Debug for XmlWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("XmlWriter").finish_non_exhaustive()
+    }
+}
+
 impl XmlWriter {
     /// Create a new XML writer
     pub fn new() -> Self {
@@ -104,9 +110,13 @@ impl Default for XmlWriter {
 /// Simple DOM node for XML parsing
 #[derive(Debug, Clone)]
 pub struct XmlNode {
+    /// Element name (tag name)
     pub name: String,
+    /// Element attributes as key-value pairs
     pub attributes: HashMap<String, String>,
+    /// Text content of the element
     pub text: String,
+    /// Child elements
     pub children: Vec<XmlNode>,
 }
 

@@ -48,7 +48,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build
-        run: just check && just build
+        run: just validate && just build
         
       - name: Run unit tests
         run: just unit
