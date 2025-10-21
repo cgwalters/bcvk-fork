@@ -66,7 +66,7 @@ fn run_list(connect_uri: Option<&str>, opts: ListOpts) -> Result<()> {
 
             let mut table = Table::new();
             table.load_preset(UTF8_FULL);
-            table.set_header(vec!["NAME", "SIZE", "REFS", "IMAGE DIGEST"]);
+            table.set_header(vec!["NAME", "SIZE", "REFS", "CREATED", "IMAGE DIGEST"]);
 
             for disk in &base_disks {
                 let name = disk.path.file_name().unwrap_or("unknown");
@@ -77,6 +77,13 @@ fn run_list(connect_uri: Option<&str>, opts: ListOpts) -> Result<()> {
                     .unwrap_or_else(|| "unknown".to_string());
 
                 let refs = disk.ref_count.to_string();
+
+                let created = disk
+                    .created
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .and_then(|d| chrono::DateTime::from_timestamp(d.as_secs() as i64, 0))
+                    .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
 
                 let digest = disk
                     .image_digest
@@ -91,7 +98,7 @@ fn run_list(connect_uri: Option<&str>, opts: ListOpts) -> Result<()> {
                     })
                     .unwrap_or_else(|| "<no metadata>".to_string());
 
-                table.add_row(vec![name, &size, &refs, &digest]);
+                table.add_row(vec![name, &size, &refs, &created, &digest]);
             }
 
             println!("{}", table);

@@ -31,3 +31,4 @@ libtest-mimic = "0.7.3"
 tempfile = "3"
 uuid = { version = "1.18.1", features = ["v4"] }
 camino = "1.1.12"
+regex = "1"
