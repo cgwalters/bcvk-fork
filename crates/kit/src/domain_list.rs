@@ -199,7 +199,9 @@ impl DomainLister {
             .unwrap_or_default();
 
         // Extract memory and vcpu from domain XML
-        let memory_mb = dom.find("memory").and_then(|node| node.parse_memory_mb());
+        let memory_mb = dom
+            .find("memory")
+            .and_then(|node| crate::libvirt::parse_memory_mb(node));
 
         let vcpus = dom
             .find("vcpu")

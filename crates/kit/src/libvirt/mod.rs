@@ -61,6 +61,101 @@ impl LibvirtOptions {
     }
 }
 
+/// Convert memory value with unit to megabytes (MiB)
+/// Handles libvirt-style units distinguishing between decimal (KB, MB, GB - powers of 1000)
+/// and binary (KiB, MiB, GiB - powers of 1024) units per libvirt specification
+pub(crate) fn convert_memory_to_mb(value: u32, unit: &str) -> Option<u32> {
+    // Use u128 for calculations to prevent overflow with large units like TB
+    let value_u128 = value as u128;
+    let mib_u128 = 1024 * 1024;
+
+    let mb = match unit {
+        // Binary prefixes (powers of 1024), converting to MiB
+        "k" | "K" | "KiB" => value_u128 / 1024,
+        "M" | "MiB" => value_u128,
+        "G" | "GiB" => value_u128 * 1024,
+        "T" | "TiB" => value_u128 * 1024 * 1024,
+
+        // Decimal prefixes (powers of 1000), converting to MiB
+        "B" | "bytes" => value_u128 / mib_u128,
+        "KB" => (value_u128 * 1_000u128.pow(1)) / mib_u128,
+        "MB" => (value_u128 * 1_000u128.pow(2)) / mib_u128,
+        "GB" => (value_u128 * 1_000u128.pow(3)) / mib_u128,
+        "TB" => (value_u128 * 1_000u128.pow(4)) / mib_u128,
+
+        // Libvirt default is KiB for memory
+        _ => value_u128 / 1024,
+    };
+    u32::try_from(mb).ok()
+}
+
+/// Parse memory value from a libvirt XML node with unit attribute
+/// Returns the value in megabytes (MiB)
+pub(crate) fn parse_memory_mb(node: &crate::xml_utils::XmlNode) -> Option<u32> {
+    let value = node.text_content().parse::<u32>().ok()?;
+    // Convert to MB based on unit attribute (default is KiB per libvirt spec)
+    let unit = node
+        .attributes
+        .get("unit")
+        .map(|s| s.as_str())
+        .unwrap_or("KiB");
+    convert_memory_to_mb(value, unit)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_convert_memory_to_mb() {
+        // Test binary units (powers of 1024)
+        assert_eq!(convert_memory_to_mb(4194304, "KiB"), Some(4096));
+        assert_eq!(convert_memory_to_mb(2097152, "KiB"), Some(2048));
+        assert_eq!(convert_memory_to_mb(2048, "MiB"), Some(2048));
+        assert_eq!(convert_memory_to_mb(4096, "MiB"), Some(4096));
+        assert_eq!(convert_memory_to_mb(4, "GiB"), Some(4096));
+        assert_eq!(convert_memory_to_mb(2, "GiB"), Some(2048));
+
+        // Test short forms (binary)
+        assert_eq!(convert_memory_to_mb(4, "G"), Some(4096));
+        assert_eq!(convert_memory_to_mb(2048, "M"), Some(2048));
+        assert_eq!(convert_memory_to_mb(2097152, "K"), Some(2048));
+
+        // Test decimal units (powers of 1000)
+        assert_eq!(convert_memory_to_mb(1048576, "KB"), Some(1000));
+        assert_eq!(convert_memory_to_mb(1024, "MB"), Some(976));
+        assert_eq!(convert_memory_to_mb(4, "GB"), Some(3814));
+
+        // Test default/unknown unit (defaults to KiB)
+        assert_eq!(convert_memory_to_mb(4194304, "unknown"), Some(4096));
+    }
+
+    #[test]
+    fn test_parse_memory_mb() {
+        use crate::xml_utils::parse_xml_dom;
+
+        // Test KiB (default unit)
+        let xml = r#"<memory>4194304</memory>"#;
+        let dom = parse_xml_dom(xml).unwrap();
+        assert_eq!(parse_memory_mb(&dom), Some(4096));
+
+        // Test MiB
+        let xml = r#"<memory unit='MiB'>2048</memory>"#;
+        let dom = parse_xml_dom(xml).unwrap();
+        assert_eq!(parse_memory_mb(&dom), Some(2048));
+
+        // Test GiB
+        let xml = r#"<memory unit='GiB'>4</memory>"#;
+        let dom = parse_xml_dom(xml).unwrap();
+        assert_eq!(parse_memory_mb(&dom), Some(4096));
+
+        // Test KB (decimal unit: 1000-based)
+        let xml = r#"<memory unit='KB'>1048576</memory>"#;
+        let dom = parse_xml_dom(xml).unwrap();
+        assert_eq!(parse_memory_mb(&dom), Some(1000));
+    }
+}
+
 /// libvirt subcommands for managing bootc disk images and domains
 #[derive(Debug, Subcommand)]
 pub enum LibvirtSubcommands {
