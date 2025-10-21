@@ -299,6 +299,10 @@ fn main() {
             tests::libvirt_base_disks::test_base_disks_list_command();
             Ok(())
         }),
+        Trial::test("libvirt_base_disks_list_shows_timestamp", || {
+            tests::libvirt_base_disks::test_base_disks_list_shows_timestamp();
+            Ok(())
+        }),
         Trial::test("libvirt_base_disks_prune_dry_run", || {
             tests::libvirt_base_disks::test_base_disks_prune_dry_run();
             Ok(())

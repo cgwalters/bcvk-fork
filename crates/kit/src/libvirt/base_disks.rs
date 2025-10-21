@@ -320,8 +320,10 @@ pub fn list_base_disks(connect_uri: Option<&str>) -> Result<Vec<BaseDiskInfo>> {
                         )
                         .unwrap_or(None);
 
-                    // Get file size
-                    let size = entry.metadata().ok().map(|m| m.len());
+                    // Get file size and creation time
+                    let metadata = entry.metadata().ok();
+                    let size = metadata.as_ref().map(|m| m.len());
+                    let created = metadata.and_then(|m| m.created().ok());
 
                     // Count references
                     let ref_count = count_base_disk_references(&path, &vm_disks)?;
@@ -331,6 +333,7 @@ pub fn list_base_disks(connect_uri: Option<&str>) -> Result<Vec<BaseDiskInfo>> {
                         image_digest,
                         size,
                         ref_count,
+                        created,
                     });
                 }
             }
@@ -347,6 +350,7 @@ pub struct BaseDiskInfo {
     pub image_digest: Option<String>,
     pub size: Option<u64>,
     pub ref_count: usize,
+    pub created: Option<std::time::SystemTime>,
 }
 
 /// Prune unreferenced base disks

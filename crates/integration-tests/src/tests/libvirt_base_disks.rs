@@ -9,6 +9,7 @@
 use std::process::Command;
 
 use crate::{get_bck_command, get_test_image, run_bcvk};
+use regex::Regex;
 
 /// Test that base disk is created and reused for multiple VMs
 pub fn test_base_disk_creation_and_reuse() {
@@ -128,6 +129,75 @@ pub fn test_base_disks_list_command() {
             stderr.contains("pool") || stderr.contains("libvirt") || stderr.contains("connect"),
             "Should have meaningful error about libvirt connectivity"
         );
+    }
+}
+
+/// Test base-disks list shows creation timestamp
+pub fn test_base_disks_list_shows_timestamp() {
+    let test_image = get_test_image();
+    let bck = get_bck_command().unwrap();
+
+    println!("Testing base-disks list shows creation timestamp");
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let vm_name = format!("test-base-timestamp-{}", timestamp);
+
+    cleanup_domain(&vm_name);
+
+    // Create a VM to ensure we have at least one base disk
+    println!("Creating VM to generate base disk...");
+    let vm_output = run_bcvk(&[
+        "libvirt",
+        "run",
+        "--name",
+        &vm_name,
+        "--filesystem",
+        "ext4",
+        &test_image,
+    ])
+    .expect("Failed to create VM");
+
+    if !vm_output.success() {
+        cleanup_domain(&vm_name);
+        panic!("Failed to create VM: {}", vm_output.stderr);
+    }
+
+    // Run base-disks list
+    let output = Command::new(&bck)
+        .args(["libvirt", "base-disks", "list"])
+        .output()
+        .expect("Failed to run base-disks list");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    cleanup_domain(&vm_name);
+
+    if output.status.success() {
+        println!("base-disks list output:\n{}", stdout);
+
+        // Should have CREATED column in header
+        assert!(
+            stdout.contains("CREATED"),
+            "Should show CREATED column in header"
+        );
+
+        // Should show timestamp values (either a date or "unknown")
+        // Timestamp format is YYYY-MM-DD HH:MM
+        let re = Regex::new(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}|unknown").unwrap();
+        let has_timestamp = re.is_match(&stdout);
+        assert!(
+            has_timestamp,
+            "Should show timestamp values in CREATED column"
+        );
+
+        println!("✓ base-disks list shows creation timestamp");
+    } else {
+        println!("base-disks list failed: {}", stderr);
+        panic!("Failed to run base-disks list: {}", stderr);
     }
 }
 
