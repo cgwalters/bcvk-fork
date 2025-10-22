@@ -103,7 +103,7 @@ pub(crate) fn convert_memory_to_mb(value: u32, unit: &str) -> Option<u32> {
 /// and binary (KiB, MiB, GiB - powers of 1024) units per libvirt specification
 /// Returns None if the unit is unknown or if the result overflows u64
 #[allow(dead_code)]
-pub(crate) fn convert_to_mb_u64(value: u64, unit: &str) -> Option<u64> {
+pub(crate) fn convert_to_mb(value: u64, unit: &str) -> Option<u64> {
     let value_u128 = value as u128;
     let mib_u128 = 1024 * 1024;
 

@@ -138,38 +138,28 @@ pub(crate) fn parse_memory_to_mb(memory_str: &str) -> Result<u32> {
     }
 
     // Check if it ends with a unit suffix
-    if let Some(last_char) = memory_str.chars().last() {
-        match last_char.to_ascii_uppercase() {
-            'G' => {
-                let number_part = &memory_str[..memory_str.len() - 1];
-                let gb: f64 = number_part
-                    .parse()
-                    .context("Invalid number in memory specification")?;
-                Ok((gb * 1024.0) as u32)
-            }
-            'M' => {
-                let number_part = &memory_str[..memory_str.len() - 1];
-                let mb: u32 = number_part
-                    .parse()
-                    .context("Invalid number in memory specification")?;
-                Ok(mb)
-            }
-            'K' => {
-                let number_part = &memory_str[..memory_str.len() - 1];
-                let kb: u32 = number_part
-                    .parse()
-                    .context("Invalid number in memory specification")?;
-                Ok(kb / 1024)
-            }
-            _ => {
-                // No suffix, assume megabytes
-                let mb: u32 = memory_str
-                    .parse()
-                    .context("Invalid number in memory specification")?;
-                Ok(mb)
-            }
-        }
-    } else {
-        Err(eyre!("Memory specification cannot be empty - please provide a value like '2G', '1024M', or '512'"))
-    }
+    let last_char = memory_str
+        .chars()
+        .last()
+        .ok_or_else(|| eyre!("Memory specification cannot be empty"))?;
+
+    let (number_str, unit) = match last_char.to_ascii_uppercase() {
+        'G' => (&memory_str[..memory_str.len() - 1], "GiB"),
+        'M' => (&memory_str[..memory_str.len() - 1], "MiB"),
+        'K' => (&memory_str[..memory_str.len() - 1], "KiB"),
+        _ => (memory_str, "MiB"), // No suffix, assume megabytes
+    };
+
+    let number: f64 = number_str
+        .parse()
+        .context("Invalid number in memory specification")?;
+
+    // Use libvirt helper to get bytes per unit
+    let bytes_per_unit =
+        crate::libvirt::unit_to_bytes(unit).ok_or_else(|| eyre!("Unknown unit: {}", unit))? as f64;
+
+    let mib = 1024.0 * 1024.0;
+    let total_mb = (number * bytes_per_unit) / mib;
+
+    Ok(total_mb as u32)
 }
