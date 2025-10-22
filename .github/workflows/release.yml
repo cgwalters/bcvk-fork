@@ -8,13 +8,75 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Create Release
+  build:
+    name: Build ${{ matrix.arch }}
     if: |
       (github.event_name == 'pull_request' &&
        github.event.pull_request.merged == true &&
        contains(github.event.pull_request.labels.*.name, 'release'))
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            arch: aarch64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y just pkg-config go-md2man libssl-dev
+          # Install cross-compilation target if needed
+          if [ "${{ matrix.target }}" != "$(rustc -vV | grep host | cut -d' ' -f2)" ]; then
+            rustup target add ${{ matrix.target }}
+          fi
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-build-${{ matrix.target }}
+
+      - name: Build and archive
+        run: |
+          # Set the target architecture
+          export CARGO_BUILD_TARGET=${{ matrix.target }}
+          just build
+          just archive
+        env:
+          CARGO_PROFILE_RELEASE_LTO: true
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
+          CARGO_BUILD_TARGET: ${{ matrix.target }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bcvk-${{ matrix.arch }}-binary
+          path: |
+            target/bcvk-*.tar.gz
+            target/bcvk-*.tar.gz.sha256
+          retention-days: 1
+
+  create-release:
+    name: Create Release
+    needs: build
+    if: |
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.merged == true &&
+       contains(github.event.pull_request.labels.*.name, 'release'))
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -52,26 +114,10 @@ jobs:
 
           echo "Successfully created and pushed tag $TAG_NAME"
 
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y just pkg-config go-md2man libssl-dev
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache build artifacts
-        uses: Swatinem/rust-cache@v2
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
-          key: release-build
-
-      - name: Build and archive
-        run: |
-          just build
-          just archive
-        env:
-          CARGO_PROFILE_RELEASE_LTO: true
-          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
+          path: artifacts
 
       - name: Create release
         env:
@@ -92,13 +138,13 @@ jobs:
           
           Download the appropriate binary for your platform from the assets below.
           
-          ### Linux x86_64 (glibc)
+          ### Linux (glibc)
           \`\`\`bash
-          curl -LO https://github.com/${{ github.repository }}/releases/download/$TAG_NAME/bcvk-x86_64-unknown-linux-gnu.tar.gz
-          tar xzf bcvk-x86_64-unknown-linux-gnu.tar.gz
-          sudo mv bcvk-x86_64-unknown-linux-gnu /usr/local/bin/bcvk
+          ARCH=$(arch)
+          curl -LO https://github.com/${{ github.repository }}/releases/download/$TAG_NAME/bcvk-${ARCH}-unknown-linux-gnu.tar.gz
+          tar xzf bcvk-${ARCH}-unknown-linux-gnu.tar.gz
+          sudo mv bcvk-${ARCH}-unknown-linux-gnu /usr/local/bin/bcvk
           \`\`\`
-          
           
           ## Checksums
           
@@ -110,8 +156,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cd target
-          for file in bcvk-*.tar.gz bcvk-*.tar.gz.sha256; do
-            echo "Uploading $file"
-            gh release upload "${{ steps.extract_version.outputs.TAG_NAME }}" "$file" --clobber
+          cd artifacts
+          for dir in */; do
+            cd "$dir"
+            for file in bcvk-*.tar.gz bcvk-*.tar.gz.sha256; do
+              if [ -f "$file" ]; then
+                echo "Uploading $file"
+                gh release upload "${{ steps.extract_version.outputs.TAG_NAME }}" "$file" --clobber
+              fi
+            done
+            cd ..
           done
