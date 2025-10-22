@@ -7,16 +7,25 @@
 //! - `bcvk libvirt ssh` - SSH into domains
 //! - Domain lifecycle management (start/stop/rm/inspect)
 
+use color_eyre::Result;
+use linkme::distributed_slice;
 use std::process::Command;
 
 use crate::{
-    get_bck_command, get_test_image, run_bcvk, run_bcvk_nocapture, LIBVIRT_INTEGRATION_TEST_LABEL,
+    get_bck_command, get_test_image, run_bcvk, run_bcvk_nocapture, IntegrationTest,
+    INTEGRATION_TESTS, LIBVIRT_INTEGRATION_TEST_LABEL,
 };
 use bcvk::xml_utils::parse_xml_dom;
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_LIBVIRT_LIST_FUNCTIONALITY: IntegrationTest = IntegrationTest::new(
+    "libvirt_list_functionality",
+    test_libvirt_list_functionality,
+);
+
 /// Test libvirt list functionality (lists domains)
-pub fn test_libvirt_list_functionality() {
-    let bck = get_bck_command().unwrap();
+fn test_libvirt_list_functionality() -> Result<()> {
+    let bck = get_bck_command()?;
 
     let output = Command::new(&bck)
         .args(["libvirt", "list"])
@@ -46,11 +55,16 @@ pub fn test_libvirt_list_functionality() {
     }
 
     println!("libvirt list functionality tested");
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_LIBVIRT_LIST_JSON_OUTPUT: IntegrationTest =
+    IntegrationTest::new("libvirt_list_json_output", test_libvirt_list_json_output);
+
 /// Test libvirt list with JSON output
-pub fn test_libvirt_list_json_output() {
-    let bck = get_bck_command().unwrap();
+fn test_libvirt_list_json_output() -> Result<()> {
+    let bck = get_bck_command()?;
 
     let output = Command::new(&bck)
         .args(["libvirt", "list", "--format", "json"])
@@ -62,7 +76,7 @@ pub fn test_libvirt_list_json_output() {
 
     if output.status.success() {
         // If successful, should be valid JSON
-        let json_result: Result<serde_json::Value, _> = serde_json::from_str(&stdout);
+        let json_result: std::result::Result<serde_json::Value, _> = serde_json::from_str(&stdout);
         assert!(
             json_result.is_ok(),
             "libvirt list --format json should produce valid JSON: {}",
@@ -78,10 +92,17 @@ pub fn test_libvirt_list_json_output() {
     }
 
     println!("libvirt list JSON output tested");
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_LIBVIRT_LIST_JSON_SSH_METADATA: IntegrationTest = IntegrationTest::new(
+    "test_libvirt_list_json_ssh_metadata",
+    test_libvirt_list_json_ssh_metadata,
+);
+
 /// Test libvirt list JSON output includes SSH metadata
-pub fn test_libvirt_list_json_ssh_metadata() {
+fn test_libvirt_list_json_ssh_metadata() -> Result<()> {
     let test_image = get_test_image();
 
     // Generate unique domain name for this test
@@ -128,7 +149,7 @@ pub fn test_libvirt_list_json_ssh_metadata() {
 
     // List domains with JSON format
     println!("Listing domains with JSON format...");
-    let bck = get_bck_command().unwrap();
+    let bck = get_bck_command()?;
     let list_output = Command::new(&bck)
         .args(["libvirt", "list", "--format", "json", "-a"])
         .output()
@@ -212,11 +233,18 @@ pub fn test_libvirt_list_json_ssh_metadata() {
     );
 
     println!("✓ libvirt list JSON SSH metadata test passed");
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_LIBVIRT_RUN_RESOURCE_OPTIONS: IntegrationTest = IntegrationTest::new(
+    "test_libvirt_run_resource_options",
+    test_libvirt_run_resource_options,
+);
+
 /// Test domain resource configuration options
-pub fn test_libvirt_run_resource_options() {
-    let bck = get_bck_command().unwrap();
+fn test_libvirt_run_resource_options() -> Result<()> {
+    let bck = get_bck_command()?;
 
     // Test various resource configurations are accepted syntactically
     let resource_tests = vec![
@@ -255,11 +283,16 @@ pub fn test_libvirt_run_resource_options() {
     }
 
     println!("libvirt run resource options validated");
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_LIBVIRT_RUN_NETWORKING: IntegrationTest =
+    IntegrationTest::new("test_libvirt_run_networking", test_libvirt_run_networking);
+
 /// Test domain networking configuration
-pub fn test_libvirt_run_networking() {
-    let bck = get_bck_command().unwrap();
+fn test_libvirt_run_networking() -> Result<()> {
+    let bck = get_bck_command()?;
 
     let network_configs = vec![
         vec!["--network", "user"],
@@ -297,11 +330,16 @@ pub fn test_libvirt_run_networking() {
     }
 
     println!("libvirt run networking options validated");
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_LIBVIRT_SSH_INTEGRATION: IntegrationTest =
+    IntegrationTest::new("test_libvirt_ssh_integration", test_libvirt_ssh_integration);
+
 /// Test SSH integration with created domains (syntax only)
-pub fn test_libvirt_ssh_integration() {
-    let bck = get_bck_command().unwrap();
+fn test_libvirt_ssh_integration() -> Result<()> {
+    let bck = get_bck_command()?;
 
     // Test that SSH command integration works syntactically
     let output = Command::new(&bck)
@@ -322,10 +360,17 @@ pub fn test_libvirt_ssh_integration() {
     }
 
     println!("libvirt SSH integration tested");
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_LIBVIRT_RUN_SSH_FULL_WORKFLOW: IntegrationTest = IntegrationTest::new(
+    "test_libvirt_run_ssh_full_workflow",
+    test_libvirt_run_ssh_full_workflow,
+);
+
 /// Test full libvirt run + SSH workflow like run_ephemeral SSH tests
-pub fn test_libvirt_run_ssh_full_workflow() {
+fn test_libvirt_run_ssh_full_workflow() -> Result<()> {
     let test_image = get_test_image();
 
     // Generate unique domain name for this test
@@ -404,6 +449,7 @@ pub fn test_libvirt_run_ssh_full_workflow() {
     );
 
     println!("✓ Full libvirt run + SSH workflow test passed");
+    Ok(())
 }
 
 /// Helper function to cleanup domain
@@ -416,7 +462,10 @@ fn cleanup_domain(domain_name: &str) {
         .output();
 
     // Use bcvk libvirt rm for proper cleanup
-    let bck = get_bck_command().unwrap();
+    let bck = match get_bck_command() {
+        Ok(cmd) => cmd,
+        Err(_) => return,
+    };
     let cleanup_output = Command::new(&bck)
         .args(&["libvirt", "rm", domain_name, "--force", "--stop"])
         .output();
@@ -471,9 +520,13 @@ fn wait_for_ssh_available(
     }
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_LIBVIRT_VM_LIFECYCLE: IntegrationTest =
+    IntegrationTest::new("test_libvirt_vm_lifecycle", test_libvirt_vm_lifecycle);
+
 /// Test VM startup and shutdown with libvirt run
-pub fn test_libvirt_vm_lifecycle() {
-    let bck = get_bck_command().unwrap();
+fn test_libvirt_vm_lifecycle() -> Result<()> {
+    let bck = get_bck_command()?;
     let test_volume = "test-vm-lifecycle";
     let domain_name = format!("bootc-{}", test_volume);
 
@@ -570,11 +623,16 @@ pub fn test_libvirt_vm_lifecycle() {
     println!("Successfully stopped VM: {}", domain_name);
 
     println!("VM lifecycle test completed");
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_LIBVIRT_BIND_STORAGE_RO: IntegrationTest =
+    IntegrationTest::new("test_libvirt_bind_storage_ro", test_libvirt_bind_storage_ro);
+
 /// Test container storage binding functionality end-to-end
-pub fn test_libvirt_bind_storage_ro() {
-    let bck = get_bck_command().unwrap();
+fn test_libvirt_bind_storage_ro() -> Result<()> {
+    let bck = get_bck_command()?;
     let test_image = get_test_image();
 
     // First check if libvirt supports readonly virtiofs
@@ -600,7 +658,7 @@ pub fn test_libvirt_bind_storage_ro() {
         println!("Skipping test: libvirt does not support readonly virtiofs");
         println!("libvirt version: {:?}", status["version"]);
         println!("Requires libvirt 11.0+ for readonly virtiofs support");
-        return;
+        return Ok(());
     }
 
     // Generate unique domain name for this test
@@ -776,11 +834,18 @@ pub fn test_libvirt_bind_storage_ro() {
     cleanup_domain(&domain_name);
 
     println!("✓ --bind-storage-ro end-to-end test passed");
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_LIBVIRT_LABEL_FUNCTIONALITY: IntegrationTest = IntegrationTest::new(
+    "test_libvirt_label_functionality",
+    test_libvirt_label_functionality,
+);
+
 /// Test libvirt label functionality
-pub fn test_libvirt_label_functionality() {
-    let bck = get_bck_command().unwrap();
+fn test_libvirt_label_functionality() -> Result<()> {
+    let bck = get_bck_command()?;
     let test_image = get_test_image();
 
     // Generate unique domain name for this test
@@ -905,11 +970,16 @@ pub fn test_libvirt_label_functionality() {
     cleanup_domain(&domain_name);
 
     println!("✓ Label functionality test passed");
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_LIBVIRT_ERROR_HANDLING: IntegrationTest =
+    IntegrationTest::new("test_libvirt_error_handling", test_libvirt_error_handling);
+
 /// Test error handling for invalid configurations
-pub fn test_libvirt_error_handling() {
-    let bck = get_bck_command().unwrap();
+fn test_libvirt_error_handling() -> Result<()> {
+    let bck = get_bck_command()?;
 
     let error_cases = vec![
         // Missing required arguments
@@ -945,10 +1015,15 @@ pub fn test_libvirt_error_handling() {
     }
 
     println!("libvirt error handling validated");
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_LIBVIRT_TRANSIENT_VM: IntegrationTest =
+    IntegrationTest::new("test_libvirt_transient_vm", test_libvirt_transient_vm);
+
 /// Test transient VM functionality
-pub fn test_libvirt_transient_vm() {
+fn test_libvirt_transient_vm() -> Result<()> {
     let test_image = get_test_image();
 
     // Generate unique domain name for this test
@@ -1099,4 +1174,5 @@ pub fn test_libvirt_transient_vm() {
     }
 
     println!("✓ Transient VM test passed");
+    Ok(())
 }

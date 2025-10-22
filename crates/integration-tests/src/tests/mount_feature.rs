@@ -15,10 +15,12 @@
 //! - Warning and continuing on failures
 
 use camino::Utf8Path;
+use color_eyre::Result;
+use linkme::distributed_slice;
 use std::fs;
 use tempfile::TempDir;
 
-use crate::{get_test_image, run_bcvk, INTEGRATION_TEST_LABEL};
+use crate::{get_test_image, run_bcvk, IntegrationTest, INTEGRATION_TESTS, INTEGRATION_TEST_LABEL};
 
 /// Create a systemd unit that verifies a mount exists and tests writability
 fn create_mount_verify_unit(
@@ -66,7 +68,11 @@ StandardError=journal+console
     Ok(())
 }
 
-pub fn test_mount_feature_bind() {
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_MOUNT_FEATURE_BIND: IntegrationTest =
+    IntegrationTest::new("mount_feature_bind", test_mount_feature_bind);
+
+fn test_mount_feature_bind() -> Result<()> {
     // Create a temporary directory to test bind mounting
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let temp_dir_path = Utf8Path::from_path(temp_dir.path()).expect("temp dir path is not utf8");
@@ -110,15 +116,19 @@ pub fn test_mount_feature_bind() {
         "--karg",
         "systemd.journald.forward_to_console=1",
         &get_test_image(),
-    ])
-    .expect("Failed to run bcvk with bind mount");
+    ])?;
 
     assert!(output.stdout.contains("ok mount verify"));
 
     println!("Successfully tested and verified bind mount feature");
+    Ok(())
 }
 
-pub fn test_mount_feature_ro_bind() {
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_MOUNT_FEATURE_RO_BIND: IntegrationTest =
+    IntegrationTest::new("mount_feature_ro_bind", test_mount_feature_ro_bind);
+
+fn test_mount_feature_ro_bind() -> Result<()> {
     // Create a temporary directory to test read-only bind mounting
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let temp_dir_path = Utf8Path::from_path(temp_dir.path()).expect("temp dir path is not utf8");
@@ -158,8 +168,8 @@ pub fn test_mount_feature_ro_bind() {
         "--karg",
         "systemd.journald.forward_to_console=1",
         &get_test_image(),
-    ])
-    .expect("Failed to run bcvk with ro-bind mount");
+    ])?;
 
     assert!(output.stdout.contains("ok mount verify"));
+    Ok(())
 }

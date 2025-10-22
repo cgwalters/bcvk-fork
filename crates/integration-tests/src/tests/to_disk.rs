@@ -15,13 +15,18 @@
 //! - Warning and continuing on failures
 
 use camino::Utf8PathBuf;
+use color_eyre::Result;
+use linkme::distributed_slice;
 use std::process::Command;
 use tempfile::TempDir;
 
-use crate::{run_bcvk, INTEGRATION_TEST_LABEL};
+use crate::{run_bcvk, IntegrationTest, INTEGRATION_TESTS, INTEGRATION_TEST_LABEL};
+
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_TO_DISK: IntegrationTest = IntegrationTest::new("to_disk", test_to_disk);
 
 /// Test actual bootc installation to a disk image
-pub fn test_to_disk() {
+fn test_to_disk() -> Result<()> {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let disk_path = Utf8PathBuf::try_from(temp_dir.path().join("test-disk.img"))
         .expect("temp path is not UTF-8");
@@ -32,8 +37,7 @@ pub fn test_to_disk() {
         INTEGRATION_TEST_LABEL,
         "quay.io/centos-bootc/centos-bootc:stream10",
         disk_path.as_str(),
-    ])
-    .expect("Failed to run bcvk to-disk");
+    ])?;
 
     assert!(
         output.success(),
@@ -82,10 +86,15 @@ pub fn test_to_disk() {
         "No 'Installation complete' message found in output. This indicates bootc install did not complete successfully. stdout: {}, stderr: {}",
         output.stdout, output.stderr
     );
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_TO_DISK_QCOW2: IntegrationTest =
+    IntegrationTest::new("to_disk_qcow2", test_to_disk_qcow2);
+
 /// Test bootc installation to a qcow2 disk image
-pub fn test_to_disk_qcow2() {
+fn test_to_disk_qcow2() -> Result<()> {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let disk_path = Utf8PathBuf::try_from(temp_dir.path().join("test-disk.qcow2"))
         .expect("temp path is not UTF-8");
@@ -97,8 +106,7 @@ pub fn test_to_disk_qcow2() {
         INTEGRATION_TEST_LABEL,
         "quay.io/centos-bootc/centos-bootc:stream10",
         disk_path.as_str(),
-    ])
-    .expect("Failed to run bcvk to-disk with qcow2 format");
+    ])?;
 
     assert!(
         output.success(),
@@ -136,10 +144,15 @@ pub fn test_to_disk_qcow2() {
         "No 'Installation complete' message found in output. This indicates bootc install did not complete successfully. stdout: {}, stderr: {}",
         output.stdout, output.stderr
     );
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_TO_DISK_CACHING: IntegrationTest =
+    IntegrationTest::new("to_disk_caching", test_to_disk_caching);
+
 /// Test disk image caching functionality
-pub fn test_to_disk_caching() {
+fn test_to_disk_caching() -> Result<()> {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let disk_path = Utf8PathBuf::try_from(temp_dir.path().join("test-disk-cache.img"))
         .expect("temp path is not UTF-8");
@@ -151,8 +164,7 @@ pub fn test_to_disk_caching() {
         INTEGRATION_TEST_LABEL,
         "quay.io/centos-bootc/centos-bootc:stream10",
         disk_path.as_str(),
-    ])
-    .expect("Failed to run bcvk to-disk (first time)");
+    ])?;
 
     assert!(
         output1.success(),
@@ -179,8 +191,7 @@ pub fn test_to_disk_caching() {
         INTEGRATION_TEST_LABEL,
         "quay.io/centos-bootc/centos-bootc:stream10",
         disk_path.as_str(),
-    ])
-    .expect("Failed to run bcvk to-disk (second time)");
+    ])?;
 
     assert!(
         output2.success(),
@@ -208,4 +219,5 @@ pub fn test_to_disk_caching() {
         !output2.stdout.contains("Installation complete") && !output2.stderr.contains("Installation complete"),
         "Second run should not have performed installation, but found 'Installation complete' message"
     );
+    Ok(())
 }
