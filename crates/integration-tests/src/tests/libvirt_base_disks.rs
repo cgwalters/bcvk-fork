@@ -6,13 +6,21 @@
 //! - base-disks list command
 //! - base-disks prune command
 
+use color_eyre::Result;
+use linkme::distributed_slice;
+use regex::Regex;
 use std::process::Command;
 
-use crate::{get_bck_command, get_test_image, run_bcvk};
-use regex::Regex;
+use crate::{get_bck_command, get_test_image, run_bcvk, IntegrationTest, INTEGRATION_TESTS};
+
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_BASE_DISK_CREATION_AND_REUSE: IntegrationTest = IntegrationTest::new(
+    "test_base_disk_creation_and_reuse",
+    test_base_disk_creation_and_reuse,
+);
 
 /// Test that base disk is created and reused for multiple VMs
-pub fn test_base_disk_creation_and_reuse() {
+fn test_base_disk_creation_and_reuse() -> Result<()> {
     let test_image = get_test_image();
 
     // Generate unique names for test VMs
@@ -41,8 +49,7 @@ pub fn test_base_disk_creation_and_reuse() {
         "--filesystem",
         "ext4",
         &test_image,
-    ])
-    .expect("Failed to create first VM");
+    ])?;
 
     println!("VM1 stdout: {}", vm1_output.stdout);
     println!("VM1 stderr: {}", vm1_output.stderr);
@@ -70,8 +77,7 @@ pub fn test_base_disk_creation_and_reuse() {
         "--filesystem",
         "ext4",
         &test_image,
-    ])
-    .expect("Failed to create second VM");
+    ])?;
 
     println!("VM2 stdout: {}", vm2_output.stdout);
     println!("VM2 stderr: {}", vm2_output.stderr);
@@ -91,11 +97,16 @@ pub fn test_base_disk_creation_and_reuse() {
     );
 
     println!("✓ Base disk creation and reuse test passed");
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_BASE_DISKS_LIST_COMMAND: IntegrationTest =
+    IntegrationTest::new("test_base_disks_list_command", test_base_disks_list_command);
+
 /// Test base-disks list command
-pub fn test_base_disks_list_command() {
-    let bck = get_bck_command().unwrap();
+fn test_base_disks_list_command() -> Result<()> {
+    let bck = get_bck_command()?;
 
     println!("Testing base-disks list command");
 
@@ -130,12 +141,19 @@ pub fn test_base_disks_list_command() {
             "Should have meaningful error about libvirt connectivity"
         );
     }
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_BASE_DISKS_LIST_SHOWS_TIMESTAMP: IntegrationTest = IntegrationTest::new(
+    "test_base_disks_list_shows_timestamp",
+    test_base_disks_list_shows_timestamp,
+);
+
 /// Test base-disks list shows creation timestamp
-pub fn test_base_disks_list_shows_timestamp() {
+fn test_base_disks_list_shows_timestamp() -> Result<()> {
     let test_image = get_test_image();
-    let bck = get_bck_command().unwrap();
+    let bck = get_bck_command()?;
 
     println!("Testing base-disks list shows creation timestamp");
 
@@ -157,8 +175,7 @@ pub fn test_base_disks_list_shows_timestamp() {
         "--filesystem",
         "ext4",
         &test_image,
-    ])
-    .expect("Failed to create VM");
+    ])?;
 
     if !vm_output.success() {
         cleanup_domain(&vm_name);
@@ -199,11 +216,18 @@ pub fn test_base_disks_list_shows_timestamp() {
         println!("base-disks list failed: {}", stderr);
         panic!("Failed to run base-disks list: {}", stderr);
     }
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_BASE_DISKS_PRUNE_DRY_RUN: IntegrationTest = IntegrationTest::new(
+    "test_base_disks_prune_dry_run",
+    test_base_disks_prune_dry_run,
+);
+
 /// Test base-disks prune command with dry-run
-pub fn test_base_disks_prune_dry_run() {
-    let bck = get_bck_command().unwrap();
+fn test_base_disks_prune_dry_run() -> Result<()> {
+    let bck = get_bck_command()?;
 
     println!("Testing base-disks prune --dry-run command");
 
@@ -234,10 +258,15 @@ pub fn test_base_disks_prune_dry_run() {
             "Should have meaningful error about libvirt connectivity"
         );
     }
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_VM_DISK_REFERENCES_BASE: IntegrationTest =
+    IntegrationTest::new("test_vm_disk_references_base", test_vm_disk_references_base);
+
 /// Test that VM disks reference base disks correctly
-pub fn test_vm_disk_references_base() {
+fn test_vm_disk_references_base() -> Result<()> {
     let test_image = get_test_image();
 
     let timestamp = std::time::SystemTime::now()
@@ -259,8 +288,7 @@ pub fn test_vm_disk_references_base() {
         "--filesystem",
         "ext4",
         &test_image,
-    ])
-    .expect("Failed to create VM");
+    ])?;
 
     if !output.success() {
         cleanup_domain(&vm_name);
@@ -306,6 +334,7 @@ pub fn test_vm_disk_references_base() {
     );
 
     println!("✓ VM disk reference test passed");
+    Ok(())
 }
 
 /// Helper function to cleanup domain and its disk
@@ -318,7 +347,10 @@ fn cleanup_domain(domain_name: &str) {
         .output();
 
     // Use bcvk libvirt rm for proper cleanup
-    let bck = get_bck_command().unwrap();
+    let bck = match get_bck_command() {
+        Ok(cmd) => cmd,
+        Err(_) => return,
+    };
     let cleanup_output = Command::new(&bck)
         .args(&["libvirt", "rm", domain_name, "--force", "--stop"])
         .output();

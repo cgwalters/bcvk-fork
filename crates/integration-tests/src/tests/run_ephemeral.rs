@@ -14,11 +14,12 @@
 //! - "This is acceptable in CI/testing environments"
 //! - Warning and continuing on failures
 
+use color_eyre::Result;
+use linkme::distributed_slice;
 use std::process::Command;
-
 use tracing::debug;
 
-use crate::{get_test_image, run_bcvk, INTEGRATION_TEST_LABEL};
+use crate::{get_test_image, run_bcvk, IntegrationTest, INTEGRATION_TESTS, INTEGRATION_TEST_LABEL};
 
 pub fn get_container_kernel_version(image: &str) -> String {
     // Run container to get its kernel version
@@ -43,7 +44,13 @@ pub fn get_container_kernel_version(image: &str) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-pub fn test_run_ephemeral_correct_kernel() {
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_RUN_EPHEMERAL_CORRECT_KERNEL: IntegrationTest = IntegrationTest::new(
+    "run_ephemeral_correct_kernel",
+    test_run_ephemeral_correct_kernel,
+);
+
+fn test_run_ephemeral_correct_kernel() -> Result<()> {
     let image = get_test_image();
     let container_kernel = get_container_kernel_version(&image);
     eprintln!("Container kernel version: {}", container_kernel);
@@ -57,13 +64,17 @@ pub fn test_run_ephemeral_correct_kernel() {
         &image,
         "--karg",
         "systemd.unit=poweroff.target",
-    ])
-    .expect("Failed to run bcvk ephemeral run");
+    ])?;
 
     output.assert_success("ephemeral run");
+    Ok(())
 }
 
-pub fn test_run_ephemeral_poweroff() {
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_RUN_EPHEMERAL_POWEROFF: IntegrationTest =
+    IntegrationTest::new("run_ephemeral_poweroff", test_run_ephemeral_poweroff);
+
+fn test_run_ephemeral_poweroff() -> Result<()> {
     let output = run_bcvk(&[
         "ephemeral",
         "run",
@@ -73,13 +84,19 @@ pub fn test_run_ephemeral_poweroff() {
         &get_test_image(),
         "--karg",
         "systemd.unit=poweroff.target",
-    ])
-    .expect("Failed to run bcvk ephemeral run");
+    ])?;
 
     output.assert_success("ephemeral run");
+    Ok(())
 }
 
-pub fn test_run_ephemeral_with_memory_limit() {
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_RUN_EPHEMERAL_WITH_MEMORY_LIMIT: IntegrationTest = IntegrationTest::new(
+    "run_ephemeral_with_memory_limit",
+    test_run_ephemeral_with_memory_limit,
+);
+
+fn test_run_ephemeral_with_memory_limit() -> Result<()> {
     let output = run_bcvk(&[
         "ephemeral",
         "run",
@@ -91,13 +108,17 @@ pub fn test_run_ephemeral_with_memory_limit() {
         "--karg",
         "systemd.unit=poweroff.target",
         &get_test_image(),
-    ])
-    .expect("Failed to run bcvk ephemeral run");
+    ])?;
 
     output.assert_success("ephemeral run with memory limit");
+    Ok(())
 }
 
-pub fn test_run_ephemeral_with_vcpus() {
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_RUN_EPHEMERAL_WITH_VCPUS: IntegrationTest =
+    IntegrationTest::new("run_ephemeral_with_vcpus", test_run_ephemeral_with_vcpus);
+
+fn test_run_ephemeral_with_vcpus() -> Result<()> {
     let output = run_bcvk(&[
         "ephemeral",
         "run",
@@ -109,13 +130,17 @@ pub fn test_run_ephemeral_with_vcpus() {
         "--karg",
         "systemd.unit=poweroff.target",
         &get_test_image(),
-    ])
-    .expect("Failed to run bcvk ephemeral run");
+    ])?;
 
     output.assert_success("ephemeral run with vcpus");
+    Ok(())
 }
 
-pub fn test_run_ephemeral_execute() {
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_RUN_EPHEMERAL_EXECUTE: IntegrationTest =
+    IntegrationTest::new("run_ephemeral_execute", test_run_ephemeral_execute);
+
+fn test_run_ephemeral_execute() -> Result<()> {
     let script =
         "/bin/sh -c \"echo 'Hello from VM'; echo 'Current date:'; date; echo 'Script completed successfully'\"";
 
@@ -128,8 +153,7 @@ pub fn test_run_ephemeral_execute() {
         "--execute",
         script,
         &get_test_image(),
-    ])
-    .expect("Failed to run bcvk ephemeral run with --execute");
+    ])?;
 
     output.assert_success("ephemeral run with --execute");
 
@@ -150,9 +174,16 @@ pub fn test_run_ephemeral_execute() {
         "Date output header not found in stdout: {}",
         output.stdout
     );
+    Ok(())
 }
 
-pub fn test_run_ephemeral_container_ssh_access() {
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_RUN_EPHEMERAL_CONTAINER_SSH_ACCESS: IntegrationTest = IntegrationTest::new(
+    "run_ephemeral_container_ssh_access",
+    test_run_ephemeral_container_ssh_access,
+);
+
+fn test_run_ephemeral_container_ssh_access() -> Result<()> {
     let image = get_test_image();
     let container_name = format!(
         "ssh-test-{}",
@@ -172,8 +203,7 @@ pub fn test_run_ephemeral_container_ssh_access() {
         "--name",
         &container_name,
         &image,
-    ])
-    .expect("Failed to start detached VM with SSH");
+    ])?;
 
     if !output.success() {
         panic!("Failed to start detached VM: {}", output.stderr);
@@ -185,8 +215,7 @@ pub fn test_run_ephemeral_container_ssh_access() {
         &container_name,
         "echo",
         "SSH_TEST_SUCCESS",
-    ])
-    .expect("Failed to run SSH command");
+    ])?;
 
     debug!("SSH exit status: {:?}", ssh_output.exit_code());
 
@@ -197,4 +226,5 @@ pub fn test_run_ephemeral_container_ssh_access() {
 
     assert!(ssh_output.success());
     assert!(ssh_output.stdout.contains("SSH_TEST_SUCCESS"));
+    Ok(())
 }

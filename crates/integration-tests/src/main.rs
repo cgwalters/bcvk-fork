@@ -8,7 +8,10 @@ use serde_json::Value;
 use xshell::{cmd, Shell};
 
 // Re-export constants from lib for internal use
-pub(crate) use integration_tests::{INTEGRATION_TEST_LABEL, LIBVIRT_INTEGRATION_TEST_LABEL};
+pub(crate) use integration_tests::{
+    IntegrationTest, INTEGRATION_TESTS, INTEGRATION_TEST_LABEL, LIBVIRT_INTEGRATION_TEST_LABEL,
+};
+use linkme::distributed_slice;
 
 mod tests {
     pub mod libvirt_base_disks;
@@ -129,6 +132,9 @@ pub(crate) fn run_bcvk_nocapture(args: &[&str]) -> std::io::Result<()> {
     Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_IMAGES_LIST: IntegrationTest = IntegrationTest::new("images_list", test_images_list);
+
 fn test_images_list() -> Result<()> {
     println!("Running test: bcvk images list --json");
 
@@ -174,144 +180,15 @@ fn test_images_list() -> Result<()> {
 fn main() {
     let args = Arguments::from_args();
 
-    let tests = vec![
-        Trial::test("images_list", || {
-            test_images_list()?;
-            Ok(())
-        }),
-        Trial::test("run_ephemeral_correct_kernel", || {
-            tests::run_ephemeral::test_run_ephemeral_correct_kernel();
-            Ok(())
-        }),
-        Trial::test("run_ephemeral_poweroff", || {
-            tests::run_ephemeral::test_run_ephemeral_poweroff();
-            Ok(())
-        }),
-        Trial::test("run_ephemeral_with_memory_limit", || {
-            tests::run_ephemeral::test_run_ephemeral_with_memory_limit();
-            Ok(())
-        }),
-        Trial::test("run_ephemeral_with_vcpus", || {
-            tests::run_ephemeral::test_run_ephemeral_with_vcpus();
-            Ok(())
-        }),
-        Trial::test("run_ephemeral_execute", || {
-            tests::run_ephemeral::test_run_ephemeral_execute();
-            Ok(())
-        }),
-        Trial::test("run_ephemeral_container_ssh_access", || {
-            tests::run_ephemeral::test_run_ephemeral_container_ssh_access();
-            Ok(())
-        }),
-        Trial::test("run_ephemeral_ssh_command", || {
-            tests::run_ephemeral_ssh::test_run_ephemeral_ssh_command();
-            Ok(())
-        }),
-        Trial::test("run_ephemeral_ssh_cleanup", || {
-            tests::run_ephemeral_ssh::test_run_ephemeral_ssh_cleanup();
-            Ok(())
-        }),
-        Trial::test("run_ephemeral_ssh_system_command", || {
-            tests::run_ephemeral_ssh::test_run_ephemeral_ssh_system_command();
-            Ok(())
-        }),
-        Trial::test("run_ephemeral_ssh_exit_code", || {
-            tests::run_ephemeral_ssh::test_run_ephemeral_ssh_exit_code();
-            Ok(())
-        }),
-        Trial::test("run_ephemeral_ssh_cross_distro_compatibility", || {
-            tests::run_ephemeral_ssh::test_run_ephemeral_ssh_cross_distro_compatibility();
-            Ok(())
-        }),
-        Trial::test("mount_feature_bind", || {
-            tests::mount_feature::test_mount_feature_bind();
-            Ok(())
-        }),
-        Trial::test("mount_feature_ro_bind", || {
-            tests::mount_feature::test_mount_feature_ro_bind();
-            Ok(())
-        }),
-        Trial::test("to_disk", || {
-            tests::to_disk::test_to_disk();
-            Ok(())
-        }),
-        Trial::test("to_disk_qcow2", || {
-            tests::to_disk::test_to_disk_qcow2();
-            Ok(())
-        }),
-        Trial::test("to_disk_caching", || {
-            tests::to_disk::test_to_disk_caching();
-            Ok(())
-        }),
-        Trial::test("libvirt_list_functionality", || {
-            tests::libvirt_verb::test_libvirt_list_functionality();
-            Ok(())
-        }),
-        Trial::test("libvirt_list_json_output", || {
-            tests::libvirt_verb::test_libvirt_list_json_output();
-            Ok(())
-        }),
-        Trial::test("libvirt_list_json_ssh_metadata", || {
-            tests::libvirt_verb::test_libvirt_list_json_ssh_metadata();
-            Ok(())
-        }),
-        Trial::test("libvirt_run_resource_options", || {
-            tests::libvirt_verb::test_libvirt_run_resource_options();
-            Ok(())
-        }),
-        Trial::test("libvirt_run_networking", || {
-            tests::libvirt_verb::test_libvirt_run_networking();
-            Ok(())
-        }),
-        Trial::test("libvirt_ssh_integration", || {
-            tests::libvirt_verb::test_libvirt_ssh_integration();
-            Ok(())
-        }),
-        Trial::test("libvirt_run_ssh_full_workflow", || {
-            tests::libvirt_verb::test_libvirt_run_ssh_full_workflow();
-            Ok(())
-        }),
-        Trial::test("libvirt_vm_lifecycle", || {
-            tests::libvirt_verb::test_libvirt_vm_lifecycle();
-            Ok(())
-        }),
-        Trial::test("libvirt_label_functionality", || {
-            tests::libvirt_verb::test_libvirt_label_functionality();
-            Ok(())
-        }),
-        Trial::test("libvirt_error_handling", || {
-            tests::libvirt_verb::test_libvirt_error_handling();
-            Ok(())
-        }),
-        Trial::test("libvirt_bind_storage_ro", || {
-            tests::libvirt_verb::test_libvirt_bind_storage_ro();
-            Ok(())
-        }),
-        Trial::test("libvirt_transient_vm", || {
-            tests::libvirt_verb::test_libvirt_transient_vm();
-            Ok(())
-        }),
-        Trial::test("libvirt_base_disk_creation_and_reuse", || {
-            tests::libvirt_base_disks::test_base_disk_creation_and_reuse();
-            Ok(())
-        }),
-        Trial::test("libvirt_base_disks_list_command", || {
-            tests::libvirt_base_disks::test_base_disks_list_command();
-            Ok(())
-        }),
-        Trial::test("libvirt_base_disks_list_shows_timestamp", || {
-            tests::libvirt_base_disks::test_base_disks_list_shows_timestamp();
-            Ok(())
-        }),
-        Trial::test("libvirt_base_disks_prune_dry_run", || {
-            tests::libvirt_base_disks::test_base_disks_prune_dry_run();
-            Ok(())
-        }),
-        Trial::test("libvirt_vm_disk_references_base", || {
-            tests::libvirt_base_disks::test_vm_disk_references_base();
-            Ok(())
-        }),
-    ];
+    // Collect tests from the distributed slice
+    let tests: Vec<Trial> = INTEGRATION_TESTS
+        .iter()
+        .map(|test| {
+            let name = test.name;
+            let f = test.f;
+            Trial::test(name, move || f().map_err(|e| format!("{:?}", e).into()))
+        })
+        .collect();
 
     // Run the tests and exit with the result
     libtest_mimic::run(&args, tests).exit();

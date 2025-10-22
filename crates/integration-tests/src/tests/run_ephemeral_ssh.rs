@@ -14,14 +14,23 @@
 //! - "This is acceptable in CI/testing environments"
 //! - Warning and continuing on failures
 
+use color_eyre::Result;
+use linkme::distributed_slice;
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
-use crate::{get_alternative_test_image, get_test_image, run_bcvk, INTEGRATION_TEST_LABEL};
+use crate::{
+    get_alternative_test_image, get_test_image, run_bcvk, IntegrationTest, INTEGRATION_TESTS,
+    INTEGRATION_TEST_LABEL,
+};
+
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_RUN_EPHEMERAL_SSH_COMMAND: IntegrationTest =
+    IntegrationTest::new("run_ephemeral_ssh_command", test_run_ephemeral_ssh_command);
 
 /// Test running a non-interactive command via SSH
-pub fn test_run_ephemeral_ssh_command() {
+fn test_run_ephemeral_ssh_command() -> Result<()> {
     let output = run_bcvk(&[
         "ephemeral",
         "run-ssh",
@@ -31,8 +40,7 @@ pub fn test_run_ephemeral_ssh_command() {
         "--",
         "echo",
         "hello world from SSH",
-    ])
-    .expect("Failed to run bcvk ephemeral run-ssh");
+    ])?;
 
     output.assert_success("ephemeral run-ssh");
 
@@ -41,10 +49,15 @@ pub fn test_run_ephemeral_ssh_command() {
         "Expected output not found. Got: {}",
         output.stdout
     );
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_RUN_EPHEMERAL_SSH_CLEANUP: IntegrationTest =
+    IntegrationTest::new("run_ephemeral_ssh_cleanup", test_run_ephemeral_ssh_cleanup);
+
 /// Test that the container is cleaned up when SSH exits
-pub fn test_run_ephemeral_ssh_cleanup() {
+fn test_run_ephemeral_ssh_cleanup() -> Result<()> {
     let container_name = format!("test-ssh-cleanup-{}", std::process::id());
 
     let output = run_bcvk(&[
@@ -58,8 +71,7 @@ pub fn test_run_ephemeral_ssh_cleanup() {
         "--",
         "echo",
         "testing cleanup",
-    ])
-    .expect("Failed to run bcvk ephemeral run-ssh");
+    ])?;
 
     output.assert_success("ephemeral run-ssh");
 
@@ -77,10 +89,17 @@ pub fn test_run_ephemeral_ssh_cleanup() {
         container_name,
         containers
     );
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_RUN_EPHEMERAL_SSH_SYSTEM_COMMAND: IntegrationTest = IntegrationTest::new(
+    "run_ephemeral_ssh_system_command",
+    test_run_ephemeral_ssh_system_command,
+);
+
 /// Test running system commands via SSH
-pub fn test_run_ephemeral_ssh_system_command() {
+fn test_run_ephemeral_ssh_system_command() -> Result<()> {
     let output = run_bcvk(&[
         "ephemeral",
         "run-ssh",
@@ -91,14 +110,20 @@ pub fn test_run_ephemeral_ssh_system_command() {
         "/bin/sh",
         "-c",
         "systemctl is-system-running || true",
-    ])
-    .expect("Failed to run bcvk ephemeral run-ssh");
+    ])?;
 
     output.assert_success("ephemeral run-ssh");
+    Ok(())
 }
 
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_RUN_EPHEMERAL_SSH_EXIT_CODE: IntegrationTest = IntegrationTest::new(
+    "run_ephemeral_ssh_exit_code",
+    test_run_ephemeral_ssh_exit_code,
+);
+
 /// Test that ephemeral run-ssh properly forwards exit codes
-pub fn test_run_ephemeral_ssh_exit_code() {
+fn test_run_ephemeral_ssh_exit_code() -> Result<()> {
     let output = run_bcvk(&[
         "ephemeral",
         "run-ssh",
@@ -108,8 +133,7 @@ pub fn test_run_ephemeral_ssh_exit_code() {
         "--",
         "exit",
         "42",
-    ])
-    .expect("Failed to run bcvk ephemeral run-ssh");
+    ])?;
 
     let exit_code = output.exit_code().expect("Failed to get exit code");
     assert_eq!(
@@ -117,17 +141,25 @@ pub fn test_run_ephemeral_ssh_exit_code() {
         "Exit code not properly forwarded. Expected 42, got {}",
         exit_code
     );
+    Ok(())
 }
+
+#[distributed_slice(INTEGRATION_TESTS)]
+static TEST_RUN_EPHEMERAL_SSH_CROSS_DISTRO_COMPATIBILITY: IntegrationTest = IntegrationTest::new(
+    "run_ephemeral_ssh_cross_distro_compatibility",
+    test_run_ephemeral_ssh_cross_distro_compatibility,
+);
 
 /// Test SSH functionality across different bootc images (Fedora and CentOS)
 /// This test verifies that our systemd version compatibility fix works correctly
 /// with both newer systemd (Fedora) and older systemd (CentOS Stream 9)
-pub fn test_run_ephemeral_ssh_cross_distro_compatibility() {
-    test_ssh_with_image(&get_test_image(), "primary");
-    test_ssh_with_image(&get_alternative_test_image(), "alternative");
+fn test_run_ephemeral_ssh_cross_distro_compatibility() -> Result<()> {
+    test_ssh_with_image(&get_test_image(), "primary")?;
+    test_ssh_with_image(&get_alternative_test_image(), "alternative")?;
+    Ok(())
 }
 
-fn test_ssh_with_image(image: &str, image_type: &str) {
+fn test_ssh_with_image(image: &str, image_type: &str) -> Result<()> {
     let output = run_bcvk(&[
         "ephemeral",
         "run-ssh",
@@ -137,8 +169,7 @@ fn test_ssh_with_image(image: &str, image_type: &str) {
         "--",
         "systemctl",
         "--version",
-    ])
-    .expect("Failed to run bcvk ephemeral run-ssh");
+    ])?;
 
     assert!(
         output.success(),
@@ -175,4 +206,5 @@ fn test_ssh_with_image(image: &str, image_type: &str) {
             }
         }
     }
+    Ok(())
 }
