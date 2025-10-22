@@ -338,7 +338,7 @@ impl DomainBuilder {
                 writer.end_element("interface")?;
             }
             network if network.starts_with("bridge=") => {
-                let bridge_name = &network[7..]; // Remove "bridge=" prefix
+                let bridge_name = network.strip_prefix("bridge=").unwrap();
                 writer.start_element("interface", &[("type", "bridge")])?;
                 writer.write_empty_element("source", &[("bridge", bridge_name)])?;
                 writer.write_empty_element("model", &[("type", "virtio")])?;
