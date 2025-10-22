@@ -61,32 +61,57 @@ impl LibvirtOptions {
     }
 }
 
+/// Convert a unit string to bytes multiplier
+/// Handles libvirt-style units distinguishing between decimal (KB, MB, GB - powers of 1000)
+/// and binary (KiB, MiB, GiB - powers of 1024) units per libvirt specification
+pub(crate) fn unit_to_bytes(unit: &str) -> Option<u128> {
+    match unit {
+        // Binary prefixes (powers of 1024)
+        "B" | "bytes" => Some(1),
+        "k" | "K" | "KiB" => Some(1024),
+        "M" | "MiB" => Some(1024u128.pow(2)),
+        "G" | "GiB" => Some(1024u128.pow(3)),
+        "T" | "TiB" => Some(1024u128.pow(4)),
+
+        // Decimal prefixes (powers of 1000)
+        "KB" => Some(1_000),
+        "MB" => Some(1_000u128.pow(2)),
+        "GB" => Some(1_000u128.pow(3)),
+        "TB" => Some(1_000u128.pow(4)),
+
+        _ => None,
+    }
+}
+
 /// Convert memory value with unit to megabytes (MiB)
 /// Handles libvirt-style units distinguishing between decimal (KB, MB, GB - powers of 1000)
 /// and binary (KiB, MiB, GiB - powers of 1024) units per libvirt specification
+/// Returns None if the unit is unknown or if the result overflows u32
 pub(crate) fn convert_memory_to_mb(value: u32, unit: &str) -> Option<u32> {
-    // Use u128 for calculations to prevent overflow with large units like TB
     let value_u128 = value as u128;
     let mib_u128 = 1024 * 1024;
 
-    let mb = match unit {
-        // Binary prefixes (powers of 1024), converting to MiB
-        "k" | "K" | "KiB" => value_u128 / 1024,
-        "M" | "MiB" => value_u128,
-        "G" | "GiB" => value_u128 * 1024,
-        "T" | "TiB" => value_u128 * 1024 * 1024,
+    // Convert to bytes first, then to MiB
+    let bytes = value_u128 * unit_to_bytes(unit)?;
+    let mb = bytes / mib_u128;
 
-        // Decimal prefixes (powers of 1000), converting to MiB
-        "B" | "bytes" => value_u128 / mib_u128,
-        "KB" => (value_u128 * 1_000u128.pow(1)) / mib_u128,
-        "MB" => (value_u128 * 1_000u128.pow(2)) / mib_u128,
-        "GB" => (value_u128 * 1_000u128.pow(3)) / mib_u128,
-        "TB" => (value_u128 * 1_000u128.pow(4)) / mib_u128,
-
-        // Libvirt default is KiB for memory
-        _ => value_u128 / 1024,
-    };
     u32::try_from(mb).ok()
+}
+
+/// Convert memory value with unit to megabytes (MiB), returning u64
+/// Handles libvirt-style units distinguishing between decimal (KB, MB, GB - powers of 1000)
+/// and binary (KiB, MiB, GiB - powers of 1024) units per libvirt specification
+/// Returns None if the unit is unknown or if the result overflows u64
+#[allow(dead_code)]
+pub(crate) fn convert_to_mb_u64(value: u64, unit: &str) -> Option<u64> {
+    let value_u128 = value as u128;
+    let mib_u128 = 1024 * 1024;
+
+    // Convert to bytes first, then to MiB
+    let bytes = value_u128 * unit_to_bytes(unit)?;
+    let mb = bytes / mib_u128;
+
+    u64::try_from(mb).ok()
 }
 
 /// Parse memory value from a libvirt XML node with unit attribute
@@ -126,8 +151,8 @@ mod tests {
         assert_eq!(convert_memory_to_mb(1024, "MB"), Some(976));
         assert_eq!(convert_memory_to_mb(4, "GB"), Some(3814));
 
-        // Test default/unknown unit (defaults to KiB)
-        assert_eq!(convert_memory_to_mb(4194304, "unknown"), Some(4096));
+        // Test unknown unit returns None
+        assert_eq!(convert_memory_to_mb(4194304, "unknown"), None);
     }
 
     #[test]

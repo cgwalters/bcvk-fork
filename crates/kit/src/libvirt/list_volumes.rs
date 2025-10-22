@@ -354,14 +354,7 @@ fn parse_virsh_size(size_str: &str) -> Option<u64> {
     let number: f64 = parts[0].parse().ok()?;
     let unit = parts[1];
 
-    let multiplier = match unit {
-        "B" | "bytes" => 1,
-        "KiB" | "KB" => 1024,
-        "MiB" | "MB" => 1024 * 1024,
-        "GiB" | "GB" => 1024 * 1024 * 1024,
-        "TiB" | "TB" => 1024u64.pow(4),
-        _ => return None,
-    };
+    let multiplier = super::unit_to_bytes(unit)?;
 
     Some((number * multiplier as f64) as u64)
 }
