@@ -106,25 +106,33 @@ pub(crate) fn parse_size(size_str: &str) -> Result<u64> {
         return Err(eyre!("Empty size string"));
     }
 
-    let (number_part, unit_part) = if let Some(pos) = size_str.rfind(|c: char| c.is_ascii_digit()) {
-        let (num, unit) = size_str.split_at(pos + 1);
-        (num, unit)
+    // Try to strip known unit suffixes
+    let (number_str, multiplier) = if let Some(num) = size_str.strip_suffix("TB") {
+        (num, 1024_u64.pow(4))
+    } else if let Some(num) = size_str.strip_suffix("GB") {
+        (num, 1024 * 1024 * 1024)
+    } else if let Some(num) = size_str.strip_suffix("MB") {
+        (num, 1024 * 1024)
+    } else if let Some(num) = size_str.strip_suffix("KB") {
+        (num, 1024)
+    } else if let Some(num) = size_str.strip_suffix('T') {
+        (num, 1024_u64.pow(4))
+    } else if let Some(num) = size_str.strip_suffix('G') {
+        (num, 1024 * 1024 * 1024)
+    } else if let Some(num) = size_str.strip_suffix('M') {
+        (num, 1024 * 1024)
+    } else if let Some(num) = size_str.strip_suffix('K') {
+        (num, 1024)
+    } else if let Some(num) = size_str.strip_suffix('B') {
+        (num, 1)
     } else {
-        return Err(eyre!("Invalid size format: {}", size_str));
+        // No unit suffix, assume bytes
+        (&*size_str, 1)
     };
 
-    let number: u64 = number_part
+    let number: u64 = number_str
         .parse()
-        .map_err(|_| eyre!("Invalid number in size: {}", number_part))?;
-
-    let multiplier = match unit_part {
-        "" | "B" => 1,
-        "K" | "KB" => 1024,
-        "M" | "MB" => 1024 * 1024,
-        "G" | "GB" => 1024 * 1024 * 1024,
-        "T" | "TB" => 1024_u64.pow(4),
-        _ => return Err(eyre!("Unknown size unit: {}", unit_part)),
-    };
+        .map_err(|_| eyre!("Invalid number in size: {}", number_str))?;
 
     Ok(number * multiplier)
 }
@@ -137,17 +145,25 @@ pub(crate) fn parse_memory_to_mb(memory_str: &str) -> Result<u32> {
         return Err(eyre!("Memory string cannot be empty"));
     }
 
-    // Check if it ends with a unit suffix
-    let last_char = memory_str
-        .chars()
-        .last()
-        .ok_or_else(|| eyre!("Memory specification cannot be empty"))?;
-
-    let (number_str, unit) = match last_char.to_ascii_uppercase() {
-        'G' => (&memory_str[..memory_str.len() - 1], "GiB"),
-        'M' => (&memory_str[..memory_str.len() - 1], "MiB"),
-        'K' => (&memory_str[..memory_str.len() - 1], "KiB"),
-        _ => (memory_str, "MiB"), // No suffix, assume megabytes
+    // Try to strip unit suffix, checking case-insensitively
+    let (number_str, unit) = if let Some(num) = memory_str
+        .strip_suffix('G')
+        .or_else(|| memory_str.strip_suffix('g'))
+    {
+        (num, "GiB")
+    } else if let Some(num) = memory_str
+        .strip_suffix('M')
+        .or_else(|| memory_str.strip_suffix('m'))
+    {
+        (num, "MiB")
+    } else if let Some(num) = memory_str
+        .strip_suffix('K')
+        .or_else(|| memory_str.strip_suffix('k'))
+    {
+        (num, "KiB")
+    } else {
+        // No suffix, assume megabytes
+        (memory_str, "MiB")
     };
 
     let number: f64 = number_str
