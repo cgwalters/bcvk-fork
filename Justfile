@@ -58,20 +58,9 @@ run *ARGS:
 archive: build
     #!/usr/bin/env bash
     set -euo pipefail
-    
-    # Determine target architecture
-    if [ -n "${CARGO_BUILD_TARGET:-}" ]; then
-        # Extract architecture from target triple (e.g., x86_64-unknown-linux-gnu -> x86_64)
-        ARCH=$(echo "${CARGO_BUILD_TARGET}" | cut -d'-' -f1)
-        TARGET_NAME="bcvk-${CARGO_BUILD_TARGET}"
-        BINARY_PATH="target/${CARGO_BUILD_TARGET}/release/bcvk"
-    else
-        # Fallback to host architecture for local builds
-        ARCH=$(arch)
-        TARGET_NAME="bcvk-${ARCH}-unknown-linux-gnu"
-        BINARY_PATH="target/release/bcvk"
-    fi
-    
+    ARCH=$(arch)
+    BINARY_PATH="target/release/bcvk"
+    TARGET_NAME="bcvk-${ARCH}-unknown-linux-gnu"
     ARTIFACTS_DIR="target"
     
     # Strip the binary
