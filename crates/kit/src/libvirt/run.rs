@@ -241,6 +241,10 @@ pub struct LibvirtRunOpts {
     #[clap(long)]
     pub transient: bool,
 
+    /// Bind VM lifecycle to parent process (shutdown VM when parent exits)
+    #[clap(long)]
+    pub lifecycle_bind_parent: bool,
+
     /// Additional metadata key-value pairs (used internally, not exposed via CLI)
     #[clap(skip)]
     pub metadata: std::collections::HashMap<String, String>,
@@ -334,6 +338,13 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
 
     // VM is now managed by libvirt, no need to track separately
 
+    // Spawn lifecycle monitor if requested
+    if opts.lifecycle_bind_parent {
+        spawn_lifecycle_monitor(&vm_name, connect_uri)
+            .with_context(|| "Failed to spawn lifecycle monitor")?;
+        println!("Lifecycle monitor started for domain '{}'", vm_name);
+    }
+
     println!("VM '{}' created successfully!", vm_name);
     println!("  Image: {}", opts.image);
     println!("  Disk: {}", disk_path);
@@ -401,6 +412,64 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
         println!("\nUse 'bcvk libvirt ssh {}' to connect", vm_name);
         Ok(())
     }
+}
+
+/// Spawn a background lifecycle monitor process for the VM
+pub(crate) fn spawn_lifecycle_monitor(domain_name: &str, connect_uri: Option<&str>) -> Result<()> {
+    use std::process::{Command, Stdio};
+
+    // Get the current executable path for spawning the monitor
+    let current_exe =
+        std::env::current_exe().with_context(|| "Failed to get current executable path")?;
+
+    // Get the parent process PID (the shell) to monitor
+    let parent_pid = rustix::process::getppid()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Failed to get parent process ID"))?;
+    let parent_pid_num = parent_pid.as_raw_nonzero().get() as u32;
+
+    debug!(
+        "Spawning lifecycle monitor for domain '{}' (parent PID: {})",
+        domain_name, parent_pid_num
+    );
+
+    // Build the virsh shutdown command
+    let mut virsh_args = vec!["virsh".to_string()];
+    if let Some(uri) = connect_uri {
+        virsh_args.push("-c".to_string());
+        virsh_args.push(uri.to_string());
+    }
+    virsh_args.push("shutdown".to_string());
+    virsh_args.push(domain_name.to_string());
+
+    // Build the command to spawn the monitor:
+    // internals lifecycle-monitor <parent-pid> virsh [-c <uri>] shutdown <domain>
+    let mut cmd = Command::new(&current_exe);
+    cmd.arg("internals")
+        .arg("lifecycle-monitor")
+        .arg(parent_pid_num.to_string())
+        .args(&virsh_args);
+
+    // Detach the process: redirect stdio to /dev/null and spawn in background
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    // Spawn the process
+    let child = cmd.spawn().with_context(|| {
+        format!(
+            "Failed to spawn lifecycle monitor process for domain '{}'",
+            domain_name
+        )
+    })?;
+
+    debug!(
+        "Lifecycle monitor spawned with PID {} for domain '{}' (command: {:?})",
+        child.id(),
+        domain_name,
+        virsh_args
+    );
+
+    Ok(())
 }
 
 /// Determine the appropriate default storage pool path based on connection type
