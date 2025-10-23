@@ -34,10 +34,6 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y just pkg-config go-md2man libssl-dev
-          # Install cross-compilation target if needed
-          if [ "${{ matrix.target }}" != "$(rustc -vV | grep host | cut -d' ' -f2)" ]; then
-            rustup target add ${{ matrix.target }}
-          fi
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -45,18 +41,15 @@ jobs:
       - name: Cache build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          key: release-build-${{ matrix.target }}
+          key: release-build-${{ matrix.arch }}
 
       - name: Build and archive
         run: |
-          # Set the target architecture
-          export CARGO_BUILD_TARGET=${{ matrix.target }}
           just build
           just archive
         env:
           CARGO_PROFILE_RELEASE_LTO: true
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
-          CARGO_BUILD_TARGET: ${{ matrix.target }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
