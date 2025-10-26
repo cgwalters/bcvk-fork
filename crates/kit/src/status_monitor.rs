@@ -3,6 +3,7 @@ use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::io::Write;
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver};
+use std::time::Duration;
 use tracing::{debug, warn};
 
 use crate::supervisor_status::SupervisorStatus;
@@ -47,6 +48,10 @@ impl Iterator for StatusFileIterator {
     type Item = Result<SupervisorStatus>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // Timeout for waiting on inotify events
+        // This ensures we don't block forever if vsock notifications aren't working
+        const EVENT_TIMEOUT: Duration = Duration::from_secs(10);
+
         loop {
             // First, try to read the file if it exists and has changed
             if let Some(status) = self.try_read_status_if_changed() {
@@ -54,11 +59,33 @@ impl Iterator for StatusFileIterator {
             }
 
             // Wait for file system events with timeout
-            let event = self.receiver.recv().ok()?.ok()?;
-            // Check if this event is for our target file
-            if self.is_relevant_event(&event) {
-                if let Some(status) = self.try_read_status_if_changed() {
-                    return Some(status);
+            // Use recv_timeout instead of recv to avoid blocking forever
+            match self.receiver.recv_timeout(EVENT_TIMEOUT) {
+                Ok(Ok(event)) => {
+                    // Check if this event is for our target file
+                    if self.is_relevant_event(&event) {
+                        if let Some(status) = self.try_read_status_if_changed() {
+                            return Some(status);
+                        }
+                    }
+                }
+                Ok(Err(_)) => {
+                    // Notify error - skip it
+                    continue;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // Timeout reached - check file one last time and exit
+                    debug!("Monitor timeout reached, checking file state");
+                    if let Some(status) = self.try_read_status_unconditionally() {
+                        return Some(status);
+                    }
+                    // No file or no changes after timeout - exit gracefully
+                    debug!("No status updates after timeout, exiting monitor");
+                    return None;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    // Channel disconnected - exit
+                    return None;
                 }
             }
         }
@@ -84,6 +111,22 @@ impl StatusFileIterator {
         if !mtime_changed {
             return None; // No change, don't emit
         }
+
+        // Update our tracked mtime
+        self.last_mtime = Some(current_mtime);
+
+        // Read and return the status
+        Some(SupervisorStatus::read_from_file(&self.path))
+    }
+
+    fn try_read_status_unconditionally(&mut self) -> Option<Result<SupervisorStatus>> {
+        // Check if file exists and get its mtime
+        let metadata = match std::fs::metadata(&self.path) {
+            Ok(meta) => meta,
+            Err(_) => return None, // File doesn't exist yet
+        };
+
+        let current_mtime = metadata.modified().ok()?;
 
         // Update our tracked mtime
         self.last_mtime = Some(current_mtime);
