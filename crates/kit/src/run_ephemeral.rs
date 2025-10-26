@@ -972,6 +972,11 @@ StandardOutput=file:/dev/virtio-ports/executestatus
         "systemd.volatile=overlay".to_string(),
     ];
 
+    // Issue #90: Use volatile (tmpfs) journal storage to prevent systemd-journald
+    // from writing persistent logs to virtiofs, which causes filesystem operation
+    // livelocks in nested virtualization (KVM-on-KVM) environments.
+    kernel_cmdline.push("systemd.journald.storage=volatile".to_string());
+
     if opts.common.console {
         kernel_cmdline.push("console=hvc0".to_string());
     }
