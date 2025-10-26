@@ -58,20 +58,17 @@ Forces journald to use tmpfs for log storage instead of writing to virtiofs.
 
 **Multi-layered issue combining credential delivery and SSH host key generation**
 
-#### Issue #1: SMBIOS Credential Delivery Failure
-**SMBIOS type=11 firmware variables not accessible in Codespaces nested virtualization**
+#### Issue #1: SSH Credential Delivery (UNVERIFIED)
+**Cannot verify SMBIOS vs kernel cmdline because sshd never starts**
 
-Evidence:
-- SMBIOS method (`-smbios type=11,value=...`) fails in Codespaces
-- `systemd-creds list`: "No credentials passed"
-- Works in GHA (both environments use nested virt!)
-- Kernel cmdline method works in BOTH environments
+Current state:
+- Kernel cmdline method confirmed working: authorized_keys created (734 bytes)
+- SMBIOS method: **UNTESTED** - cannot verify until sshd starts
+- ssh-access.target IS reached
+- Port 2222 forwarding works correctly
 
-**Fix Applied**: Switch from SMBIOS to kernel cmdline credential injection
-- Changed: `smbios_cred_for_root_ssh()` → `karg_for_root_ssh()`
-- Format: `systemd.set_credential_binary=tmpfiles.extra:{BASE64}`
-- Result: ✅ `/root/.ssh/authorized_keys` file IS created (734 bytes)
-- Result: ✅ `ssh-access.target` is reached
+**Note**: Initial assumption that SMBIOS doesn't work in Codespaces may be incorrect.
+Need to fix key generation issue first, then retest both methods.
 
 #### Issue #2: SSH Host Key Generation Bottleneck ← **BLOCKING ISSUE**
 **sshd-keygen services extremely slow in nested virtualization, blocking sshd startup**
@@ -94,6 +91,12 @@ Evidence:
 **Root Cause**: SSH host key generation requires entropy/randomness. Nested virtualization
 environments have limited entropy sources, making RSA/ECDSA/Ed25519 key generation very slow
 (30-240+ seconds). sshd waits for all keys to be generated before starting.
+
+**virtio-rng Added But Insufficient**:
+- Added `-device virtio-rng-pci` to provide hardware RNG from host (commit 936599b)
+- Device confirmed present in guest (`/dev/hwrng` exists)
+- Key generation progresses further (reaches `restorecon` phase)
+- **Still takes >240 seconds** - virtio-rng alone doesn't solve the issue
 
 **Impact**: SSH integration tests timeout at 240s before sshd starts
 
