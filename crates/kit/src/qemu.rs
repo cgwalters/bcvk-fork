@@ -613,6 +613,10 @@ fn spawn(
         }
     }
 
+    // Add virtio-rng device for entropy in nested virtualization
+    // This significantly speeds up SSH host key generation which requires randomness
+    cmd.args(["-device", "virtio-rng-pci"]);
+
     // No GUI, and no emulated serial ports by default.
     cmd.args(["-serial", "none", "-nographic", "-display", "none"]);
 
