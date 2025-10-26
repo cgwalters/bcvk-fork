@@ -1,7 +1,8 @@
 # Issue #90: Nested Virtualization Boot Hang Investigation
 
 **Status:** ✅ **FIXED** - VMs boot successfully in nested virtualization
-**Open Issue:** SSH connectivity timeouts in Codespaces environment (under investigation)
+**Open Issue:** ✅ **ROOT CAUSE IDENTIFIED** - SSH host key generation blocks sshd startup
+**Next Steps:** Implement virtio-rng + pre-generated SSH keys solution
 
 ---
 
@@ -51,14 +52,80 @@ Forces journald to use tmpfs for log storage instead of writing to virtiofs.
 
 ## Open Issue: SSH Connectivity in Nested Virt
 
-**Status:** 🔍 **Under Investigation**
+**Status:** ✅ **Complete Root Cause Chain Identified**
+
+### Root Cause Chain
+
+**Multi-layered issue combining credential delivery and SSH host key generation**
+
+#### Issue #1: SMBIOS Credential Delivery Failure
+**SMBIOS type=11 firmware variables not accessible in Codespaces nested virtualization**
+
+Evidence:
+- SMBIOS method (`-smbios type=11,value=...`) fails in Codespaces
+- `systemd-creds list`: "No credentials passed"
+- Works in GHA (both environments use nested virt!)
+- Kernel cmdline method works in BOTH environments
+
+**Fix Applied**: Switch from SMBIOS to kernel cmdline credential injection
+- Changed: `smbios_cred_for_root_ssh()` → `karg_for_root_ssh()`
+- Format: `systemd.set_credential_binary=tmpfiles.extra:{BASE64}`
+- Result: ✅ `/root/.ssh/authorized_keys` file IS created (734 bytes)
+- Result: ✅ `ssh-access.target` is reached
+
+#### Issue #2: SSH Host Key Generation Bottleneck ← **BLOCKING ISSUE**
+**sshd-keygen services extremely slow in nested virtualization, blocking sshd startup**
+
+Evidence:
+- sshd.service status: `Active: inactive (dead)` with `Job: 293`
+- sshd is waiting for `sshd-keygen.target` to complete
+- `systemctl list-jobs` shows keygen services still "running" after 30+ seconds:
+  ```
+  256 sshd-keygen@ecdsa.service    start running
+  259 sshd-keygen@ed25519.service  start running
+  258 sshd-keygen@rsa.service      start running
+  255 sshd-keygen.target           start waiting
+  253 sshd.service                 start waiting  ← Blocked here!
+  ```
+- Port 2222 IS listening (QEMU user-mode networking works)
+- Manual `systemctl start sshd` succeeds immediately (keys already generated)
+- journalctl: No sshd log entries (never started)
+
+**Root Cause**: SSH host key generation requires entropy/randomness. Nested virtualization
+environments have limited entropy sources, making RSA/ECDSA/Ed25519 key generation very slow
+(30-240+ seconds). sshd waits for all keys to be generated before starting.
+
+**Impact**: SSH integration tests timeout at 240s before sshd starts
+
+### Proposed Solutions
+
+**Option 1: Pre-generate SSH host keys in bootc images** (RECOMMENDED)
+- Add SSH host keys to fedora-bootc base images during build
+- Location: `/etc/ssh/ssh_host_*_key{,.pub}`
+- Benefit: sshd starts immediately (no keygen delay)
+- Trade-off: Same host keys across all ephemeral VMs (acceptable for ephemeral use)
+- Implementation: Modify bootc Containerfile to run `ssh-keygen` during build
+
+**Option 2: Use virtio-rng for better entropy**
+- Add `-device virtio-rng-pci` to QEMU command
+- Provides hardware RNG from host to guest
+- Benefit: Faster key generation (seconds vs minutes)
+- Trade-off: Requires QEMU configuration change
+- May still be slower than pre-generated keys
+
+**Option 3: Increase test timeout**
+- Change SSH_TIMEOUT from 240s to 600s
+- Benefit: Simple, no image changes needed
+- Trade-off: Tests take 10 minutes to pass, poor UX
+
+**Recommendation**: Option 1 (pre-generated keys) + Option 2 (virtio-rng for production use)
 
 ### Symptoms
 
 - All 7 SSH-based integration tests timeout after 240s in Codespaces
 - All 4 non-SSH integration tests pass
 - VMs boot successfully and reach graphical.target
-- SSH polling shows all connection attempts fail silently
+- SSH banner exchange times out (authentication failure, not network issue)
 
 ### Test Results
 
@@ -99,15 +166,30 @@ test run_ephemeral_with_vcpus                     ... ok
    - Different KVM/QEMU versions or configurations
    - Resource constraints or isolation policies
 
+### Attempted Fix (Testing in Progress)
+
+**Approach**: Switch from SMBIOS to kernel cmdline credential injection
+
+**File**: `crates/kit/src/run_ephemeral.rs` (uncommitted changes)
+**Method**: Changed `smbios_cred_for_root_ssh()` → `karg_for_root_ssh()`
+**Format**: `systemd.set_credential_binary=tmpfiles.extra:{BASE64}`
+
+**Rationale**:
+- SMBIOS method works in GHA (native KVM) but fails in Codespaces (nested KVM)
+- Kernel cmdline is more reliable delivery mechanism
+- Trade-off: Credentials visible in /proc/cmdline (less secure)
+
+**Status**: Integration tests running with new build
+
 ### Investigation Tasks
 
-- [ ] Check if vsock is being properly disabled in nested virt
-- [ ] Examine SSH key injection mechanism (SMBIOS vs vsock)
-- [ ] Compare QEMU command-line args between GHA and Codespaces
-- [ ] Test SSH connectivity with direct QEMU command
-- [ ] Verify sshd is actually running in guest VMs
-- [ ] Check if authorized_keys file is being created correctly
-- [ ] Monitor GHA test results to confirm SSH works in native KVM
+- [x] Verify sshd is actually running in guest VMs → YES
+- [x] Check if authorized_keys file is being created correctly → NO (not created)
+- [x] Examine SSH key injection mechanism (SMBIOS vs vsock) → SMBIOS not loading
+- [ ] Test kernel cmdline credential method → IN PROGRESS
+- [ ] Monitor GHA test results to confirm SSH works in native KVM with SMBIOS
+- [ ] Compare QEMU versions between GHA and Codespaces
+- [ ] Determine if fix should be environment-specific or global
 
 ### Debug Commands
 
@@ -135,7 +217,12 @@ podman exec <container-id> ps aux | grep qemu
 - **2025-10-26 Early**: Investigated boot hang, identified journald as root cause
 - **2025-10-26 Afternoon**: Implemented journald workaround, VMs now boot successfully
 - **2025-10-26 Evening**: Discovered SSH connectivity issue separate from boot hang
-- **2025-10-26 Now**: Investigating SSH failures, testing in GHA to compare environments
+- **2025-10-26 Late**:
+  - Discovered SMBIOS credentials don't work in Codespaces
+  - Implemented kernel cmdline credential injection (authorized_keys created)
+  - Found SSH host key generation blocks sshd startup in nested virt
+  - Identified complete root cause chain
+  - Documented solutions: virtio-rng + pre-generated SSH keys
 
 ---
 

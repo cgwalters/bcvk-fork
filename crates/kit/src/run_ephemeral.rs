@@ -955,14 +955,6 @@ StandardOutput=file:/dev/virtio-ports/executestatus
     let vsock_force_disabled = std::env::var("BCVK_DEBUG").as_deref() == Ok("disable-vsock");
     let vsock_enabled = !vsock_force_disabled && qemu_config.enable_vsock().is_ok();
 
-    // Handle SSH key generation and credential injection
-    if opts.common.ssh_keygen {
-        let key_pair = crate::ssh::generate_default_keypair()?;
-        // Create credential and add to kernel args
-        let pubkey = std::fs::read_to_string(key_pair.public_key_path.as_path())?;
-        let credential = crate::sshcred::smbios_cred_for_root_ssh(&pubkey)?;
-        qemu_config.add_smbios_credential(credential);
-    }
     // Build kernel command line
     let mut kernel_cmdline = vec![
         "rootfstype=virtiofs".to_string(),
@@ -988,6 +980,17 @@ StandardOutput=file:/dev/virtio-ports/executestatus
     }
 
     kernel_cmdline.extend(opts.kernel_args.clone());
+
+    // Handle SSH key generation and credential injection via kernel cmdline
+    // Using kernel cmdline method instead of SMBIOS because SMBIOS type=11
+    // firmware variables are not accessible in some nested virtualization
+    // environments (e.g. Codespaces).
+    if opts.common.ssh_keygen {
+        let key_pair = crate::ssh::generate_default_keypair()?;
+        let pubkey = std::fs::read_to_string(key_pair.public_key_path.as_path())?;
+        let credential = crate::sshcred::karg_for_root_ssh(&pubkey)?;
+        kernel_cmdline.push(credential);
+    }
 
     // TODO allocate unlinked unnamed file and pass via fd
     let mut tmp_swapfile = None;
