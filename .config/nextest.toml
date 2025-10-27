@@ -33,3 +33,10 @@ default-filter = "package(integration-tests)"
 path = "junit.xml"
 store-success-output = true
 store-failure-output = true
+
+# Per-test overrides for libvirt tests that create VMs
+# These tests race on creating libvirt base disks, so they need to run serially
+# VMs get 4 vcpus by default, so require 4 threads to prevent any parallelism
+[[profile.integration.overrides]]
+filter = 'test(~^test_libvirt_run)'
+threads-required = 4

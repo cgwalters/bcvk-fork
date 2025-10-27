@@ -96,13 +96,13 @@ fn test_libvirt_list_json_output() -> Result<()> {
 }
 
 #[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_LIST_JSON_SSH_METADATA: IntegrationTest = IntegrationTest::new(
-    "test_libvirt_list_json_ssh_metadata",
-    test_libvirt_list_json_ssh_metadata,
+static TEST_LIBVIRT_RUN_LIST_JSON_SSH_METADATA: IntegrationTest = IntegrationTest::new(
+    "test_libvirt_run_list_json_ssh_metadata",
+    test_libvirt_run_list_json_ssh_metadata,
 );
 
 /// Test libvirt list JSON output includes SSH metadata
-fn test_libvirt_list_json_ssh_metadata() -> Result<()> {
+fn test_libvirt_run_list_json_ssh_metadata() -> Result<()> {
     let test_image = get_test_image();
 
     // Generate unique domain name for this test
@@ -521,11 +521,13 @@ fn wait_for_ssh_available(
 }
 
 #[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_VM_LIFECYCLE: IntegrationTest =
-    IntegrationTest::new("test_libvirt_vm_lifecycle", test_libvirt_vm_lifecycle);
+static TEST_LIBVIRT_RUN_VM_LIFECYCLE: IntegrationTest = IntegrationTest::new(
+    "test_libvirt_run_vm_lifecycle",
+    test_libvirt_run_vm_lifecycle,
+);
 
 /// Test VM startup and shutdown with libvirt run
-fn test_libvirt_vm_lifecycle() -> Result<()> {
+fn test_libvirt_run_vm_lifecycle() -> Result<()> {
     let bck = get_bck_command()?;
     let test_volume = "test-vm-lifecycle";
     let domain_name = format!("bootc-{}", test_volume);
@@ -627,11 +629,13 @@ fn test_libvirt_vm_lifecycle() -> Result<()> {
 }
 
 #[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_BIND_STORAGE_RO: IntegrationTest =
-    IntegrationTest::new("test_libvirt_bind_storage_ro", test_libvirt_bind_storage_ro);
+static TEST_LIBVIRT_RUN_BIND_STORAGE_RO: IntegrationTest = IntegrationTest::new(
+    "test_libvirt_run_bind_storage_ro",
+    test_libvirt_run_bind_storage_ro,
+);
 
 /// Test container storage binding functionality end-to-end
-fn test_libvirt_bind_storage_ro() -> Result<()> {
+fn test_libvirt_run_bind_storage_ro() -> Result<()> {
     let bck = get_bck_command()?;
     let test_image = get_test_image();
 
@@ -804,13 +808,13 @@ fn test_libvirt_bind_storage_ro() -> Result<()> {
 }
 
 #[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_LABEL_FUNCTIONALITY: IntegrationTest = IntegrationTest::new(
-    "test_libvirt_label_functionality",
-    test_libvirt_label_functionality,
+static TEST_LIBVIRT_RUN_LABEL_FUNCTIONALITY: IntegrationTest = IntegrationTest::new(
+    "test_libvirt_run_label_functionality",
+    test_libvirt_run_label_functionality,
 );
 
 /// Test libvirt label functionality
-fn test_libvirt_label_functionality() -> Result<()> {
+fn test_libvirt_run_label_functionality() -> Result<()> {
     let bck = get_bck_command()?;
     let test_image = get_test_image();
 
@@ -985,11 +989,13 @@ fn test_libvirt_error_handling() -> Result<()> {
 }
 
 #[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_TRANSIENT_VM: IntegrationTest =
-    IntegrationTest::new("test_libvirt_transient_vm", test_libvirt_transient_vm);
+static TEST_LIBVIRT_RUN_TRANSIENT_VM: IntegrationTest = IntegrationTest::new(
+    "test_libvirt_run_transient_vm",
+    test_libvirt_run_transient_vm,
+);
 
 /// Test transient VM functionality
-fn test_libvirt_transient_vm() -> Result<()> {
+fn test_libvirt_run_transient_vm() -> Result<()> {
     let test_image = get_test_image();
 
     // Generate unique domain name for this test
@@ -1144,11 +1150,11 @@ fn test_libvirt_transient_vm() -> Result<()> {
 }
 
 #[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_BIND_MOUNTS: IntegrationTest =
-    IntegrationTest::new("test_libvirt_bind_mounts", test_libvirt_bind_mounts);
+static TEST_LIBVIRT_RUN_BIND_MOUNTS: IntegrationTest =
+    IntegrationTest::new("test_libvirt_run_bind_mounts", test_libvirt_run_bind_mounts);
 
 /// Test automatic bind mount functionality with systemd mount units
-fn test_libvirt_bind_mounts() -> Result<()> {
+fn test_libvirt_run_bind_mounts() -> Result<()> {
     use camino::Utf8Path;
     use std::fs;
     use tempfile::TempDir;
