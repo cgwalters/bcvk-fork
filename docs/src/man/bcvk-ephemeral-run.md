@@ -173,6 +173,27 @@ Development workflow example:
     
     # VM automatically cleans up when stopped due to --rm flag
 
+# DEBUGGING
+
+When troubleshooting ephemeral VM issues, bcvk provides debugging logs that can be accessed from within the container.
+
+## Virtiofsd Logs
+
+The virtiofsd daemon logs are written to `/run/virtiofsd.log` and `/run/virtiofsd-<mount-name>.log` for each filesystem mount. These logs show filesystem sharing operations between the container and VM.
+
+To view virtiofsd logs:
+
+    # Main virtiofsd log
+    podman exec <container-id> cat /run/virtiofsd.log
+
+    # Logs for additional bind mounts
+    podman exec <container-id> cat /run/virtiofsd-workspace.log
+
+Virtiofsd logs are helpful for:
+- Debugging filesystem access issues
+- Understanding file handle support warnings
+- Investigating mount-related errors
+
 # SEE ALSO
 
 **bcvk**(8)

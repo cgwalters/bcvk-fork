@@ -823,6 +823,7 @@ pub(crate) async fn run_impl(opts: RunEphemeralOpts) -> Result<()> {
                 shared_dir: source_path,
                 debug: false,
                 readonly: is_readonly,
+                log_file: Some(format!("/run/virtiofsd-{}.log", mount_name_str).into()),
             };
             additional_mounts.push((virtiofsd_config, tag.clone()));
 
@@ -945,6 +946,8 @@ StandardOutput=file:/dev/virtio-ports/executestatus
     // Prepare main virtiofsd config for the source image (will be spawned by QEMU)
     let mut main_virtiofsd_config = qemu::VirtiofsConfig::default();
     main_virtiofsd_config.debug = std::env::var("DEBUG_MODE").is_ok();
+    // Always log virtiofsd output for debugging
+    main_virtiofsd_config.log_file = Some("/run/virtiofsd.log".into());
 
     std::fs::create_dir_all(CONTAINER_STATEDIR)?;
 
