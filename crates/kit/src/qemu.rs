@@ -907,6 +907,8 @@ pub struct VirtiofsConfig {
     pub debug: bool,
     /// Mount as read-only
     pub readonly: bool,
+    /// Optional log file path for virtiofsd output
+    pub log_file: Option<Utf8PathBuf>,
 }
 
 impl Default for VirtiofsConfig {
@@ -917,6 +919,7 @@ impl Default for VirtiofsConfig {
             debug: false,
             // We don't need to write to this, there's a transient overlay
             readonly: true,
+            log_file: None,
         }
     }
 }
@@ -998,8 +1001,31 @@ pub async fn spawn_virtiofsd_async(config: &VirtiofsConfig) -> Result<tokio::pro
     // but we want to be compatible with older virtiofsd too.
     cmd.arg("--inode-file-handles=fallback");
 
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
+    // Configure output redirection
+    if let Some(log_file) = &config.log_file {
+        // Create/open log file for both stdout and stderr
+        let tokio_file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_file)
+            .await
+            .with_context(|| format!("Failed to open virtiofsd log file: {}", log_file))?;
+
+        let log_file_handle = tokio_file.into_std().await;
+
+        // Clone for stderr
+        let stderr_handle = log_file_handle
+            .try_clone()
+            .with_context(|| "Failed to clone log file handle for stderr")?;
+
+        cmd.stdout(std::process::Stdio::from(log_file_handle));
+        cmd.stderr(std::process::Stdio::from(stderr_handle));
+
+        debug!("virtiofsd output will be logged to: {}", log_file);
+    } else {
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+    }
 
     let child = cmd.spawn().with_context(|| {
         format!(
@@ -1009,8 +1035,8 @@ pub async fn spawn_virtiofsd_async(config: &VirtiofsConfig) -> Result<tokio::pro
     })?;
 
     debug!(
-        "Spawned virtiofsd: binary={}, socket={}, shared_dir={}, debug={}",
-        virtiofsd_binary, config.socket_path, config.shared_dir, config.debug
+        "Spawned virtiofsd: binary={}, socket={}, shared_dir={}, debug={}, log_file={:?}",
+        virtiofsd_binary, config.socket_path, config.shared_dir, config.debug, config.log_file
     );
 
     Ok(child)
