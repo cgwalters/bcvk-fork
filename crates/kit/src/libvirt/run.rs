@@ -98,6 +98,72 @@ impl std::fmt::Display for PortMapping {
     }
 }
 
+/// Bind mount from host to VM
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BindMount {
+    pub host_path: String,
+    pub guest_path: String,
+}
+
+impl FromStr for BindMount {
+    type Err = color_eyre::Report;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let (host_part, guest_part) = s.split_once(':').ok_or_else(|| {
+            color_eyre::eyre::eyre!(
+                "Invalid bind mount format '{}'. Expected format: host_path:guest_path",
+                s
+            )
+        })?;
+
+        let host_path = host_part.trim();
+        let guest_path = guest_part.trim();
+
+        if host_path.is_empty() || guest_path.is_empty() {
+            return Err(color_eyre::eyre::eyre!(
+                "Invalid bind mount format '{}'. Both host path and guest path must be non-empty",
+                s
+            ));
+        }
+
+        Ok(BindMount {
+            host_path: host_path.to_string(),
+            guest_path: guest_path.to_string(),
+        })
+    }
+}
+
+impl BindMount {
+    /// Validate that the bind mount paths are valid
+    fn validate(&self) -> Result<()> {
+        // Validate that the host path exists
+        let host_path_buf = std::path::Path::new(&self.host_path);
+        if !host_path_buf.exists() {
+            return Err(color_eyre::eyre::eyre!(
+                "Host path '{}' does not exist",
+                self.host_path
+            ));
+        }
+
+        if !host_path_buf.is_dir() {
+            return Err(color_eyre::eyre::eyre!(
+                "Host path '{}' is not a directory",
+                self.host_path
+            ));
+        }
+
+        // Validate that guest path is absolute
+        if !self.guest_path.starts_with('/') {
+            return Err(color_eyre::eyre::eyre!(
+                "Guest path '{}' must be an absolute path",
+                self.guest_path
+            ));
+        }
+
+        Ok(())
+    }
+}
+
 /// Options for creating and running a bootable container VM
 #[derive(Debug, Parser)]
 pub struct LibvirtRunOpts {
@@ -127,9 +193,17 @@ pub struct LibvirtRunOpts {
     #[clap(long = "port", short = 'p', action = clap::ArgAction::Append)]
     pub port_mappings: Vec<PortMapping>,
 
-    /// Volume mount from host to VM
+    /// Volume mount from host to VM (raw virtiofs tag, for manual mounting)
     #[clap(long = "volume", short = 'v', action = clap::ArgAction::Append)]
-    pub volumes: Vec<String>,
+    pub raw_volumes: Vec<String>,
+
+    /// Bind mount from host to VM (format: host_path:guest_path)
+    #[clap(long = "bind", action = clap::ArgAction::Append)]
+    pub bind_mounts: Vec<BindMount>,
+
+    /// Bind mount from host to VM as read-only (format: host_path:guest_path)
+    #[clap(long = "bind-ro", action = clap::ArgAction::Append)]
+    pub bind_mounts_ro: Vec<BindMount>,
 
     /// Network mode for the VM
     #[clap(long, default_value = "user")]
@@ -143,7 +217,7 @@ pub struct LibvirtRunOpts {
     #[clap(long)]
     pub ssh: bool,
 
-    /// Mount host container storage (RO) at /run/virtiofs-mnt-hoststorage
+    /// Mount host container storage (RO) at /run/host-container-storage
     #[clap(long = "bind-storage-ro")]
     pub bind_storage_ro: bool,
 
@@ -166,6 +240,14 @@ pub struct LibvirtRunOpts {
     /// Create a transient VM that disappears on shutdown/reboot
     #[clap(long)]
     pub transient: bool,
+
+    /// Additional metadata key-value pairs (used internally, not exposed via CLI)
+    #[clap(skip)]
+    pub metadata: std::collections::HashMap<String, String>,
+
+    /// Additional SMBIOS credentials to inject (used internally, not exposed via CLI)
+    #[clap(skip)]
+    pub extra_smbios_credentials: Vec<String>,
 }
 
 impl LibvirtRunOpts {
@@ -259,9 +341,9 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
     println!("  CPUs: {}", opts.cpus);
 
     // Display volume mount information if any
-    if !opts.volumes.is_empty() {
-        println!("\nVolume mounts:");
-        for volume_str in opts.volumes.iter() {
+    if !opts.raw_volumes.is_empty() {
+        println!("\nRaw volume mounts (manual):");
+        for volume_str in opts.raw_volumes.iter() {
             if let Ok((host_path, tag)) = parse_volume_mount(volume_str) {
                 println!(
                     "  {} (tag: {}, mount with: mount -t virtiofs {} /your/mount/point)",
@@ -278,6 +360,27 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
             println!(
                 "  localhost:{} -> VM:{}",
                 mapping.host_port, mapping.guest_port
+            );
+        }
+    }
+
+    // Display bind mount information
+    if !opts.bind_mounts.is_empty() {
+        println!("\nBind mounts (read-write):");
+        for bind_mount in opts.bind_mounts.iter() {
+            println!(
+                "  {} → {} (automatically mounted)",
+                bind_mount.host_path, bind_mount.guest_path
+            );
+        }
+    }
+
+    if !opts.bind_mounts_ro.is_empty() {
+        println!("\nBind mounts (read-only):");
+        for bind_mount in opts.bind_mounts_ro.iter() {
+            println!(
+                "  {} → {} (automatically mounted, read-only)",
+                bind_mount.host_path, bind_mount.guest_path
             );
         }
     }
@@ -583,6 +686,69 @@ fn parse_volume_mount(volume_str: &str) -> Result<(String, String)> {
     Ok((host_path.to_string(), tag.to_string()))
 }
 
+/// Process bind mounts and add them to the domain builder
+///
+/// This helper processes a slice of bind mounts, generates virtiofs filesystems,
+/// and creates systemd mount unit SMBIOS credentials for automatic mounting.
+///
+/// Takes ownership of the domain builder and returns it.
+fn process_bind_mounts(
+    bind_mounts: &[BindMount],
+    tag_prefix: &str,
+    readonly: bool,
+    mut domain_builder: crate::libvirt::domain::DomainBuilder,
+    mount_unit_smbios_creds: &mut Vec<String>,
+    mount_unit_names: &mut Vec<String>,
+) -> Result<crate::libvirt::domain::DomainBuilder> {
+    use crate::libvirt::domain::VirtiofsFilesystem;
+
+    if bind_mounts.is_empty() {
+        return Ok(domain_builder);
+    }
+
+    let mount_type = if readonly { "read-only" } else { "read-write" };
+    debug!(
+        "Processing {} {} bind mount(s)",
+        bind_mounts.len(),
+        mount_type
+    );
+
+    for (idx, bind_mount) in bind_mounts.iter().enumerate() {
+        bind_mount
+            .validate()
+            .with_context(|| format!("Failed to validate bind mount '{bind_mount:?}'"))?;
+
+        // Generate unique virtiofs tag for this bind mount
+        let tag = format!("{}{}", tag_prefix, idx);
+
+        let access_desc = if readonly { "read-only " } else { "" };
+        debug!(
+            "Adding {}bind mount: {} (host) → {} (guest) with tag '{}'",
+            access_desc, bind_mount.host_path, bind_mount.guest_path, tag
+        );
+
+        let virtiofs_fs = VirtiofsFilesystem {
+            source_dir: bind_mount.host_path.clone(),
+            tag: tag.clone(),
+            readonly,
+        };
+
+        domain_builder = domain_builder.with_virtiofs_filesystem(virtiofs_fs);
+
+        // Generate SMBIOS credential for mount unit (without dropin)
+        let unit_name = crate::sshcred::guest_path_to_unit_name(&bind_mount.guest_path);
+        let mount_unit_content =
+            crate::sshcred::generate_mount_unit(&tag, &bind_mount.guest_path, readonly);
+        let encoded_mount = data_encoding::BASE64.encode(mount_unit_content.as_bytes());
+        let mount_cred =
+            format!("io.systemd.credential.binary:systemd.extra-unit.{unit_name}={encoded_mount}");
+        mount_unit_smbios_creds.push(mount_cred);
+        mount_unit_names.push(unit_name);
+    }
+
+    Ok(domain_builder)
+}
+
 /// Check if the libvirt version supports readonly virtiofs filesystems
 /// Requires libvirt 11.0+ and modern QEMU with rust-based virtiofsd
 fn check_libvirt_readonly_support() -> Result<()> {
@@ -712,7 +878,6 @@ fn create_libvirt_domain_from_disk(
 ) -> Result<()> {
     use crate::libvirt::domain::DomainBuilder;
     use crate::ssh::generate_ssh_keypair;
-    use crate::sshcred::smbios_cred_for_root_ssh;
 
     // Generate SSH keypair for the domain
     debug!(
@@ -749,8 +914,15 @@ fn create_libvirt_domain_from_disk(
     );
     debug!("Generated ephemeral SSH keypair (will be stored in domain XML)");
 
-    // Generate SMBIOS credential for SSH key injection
-    let smbios_cred = smbios_cred_for_root_ssh(&public_key_content)?;
+    // Generate SMBIOS credential for SSH key injection and systemd environment configuration
+    // Combine SSH key setup and storage opts for systemd contexts
+    let mut tmpfiles_content = crate::sshcred::key_to_root_tmpfiles_d(&public_key_content);
+    tmpfiles_content.push_str(&crate::sshcred::storage_opts_tmpfiles_d_lines());
+    let encoded = data_encoding::BASE64.encode(tmpfiles_content.as_bytes());
+    let smbios_cred = format!("io.systemd.credential.binary:tmpfiles.extra={encoded}");
+
+    // Generate SMBIOS credentials for storage opts unit (handles /etc/environment for PAM/SSH)
+    let storage_opts_creds = crate::sshcred::smbios_creds_for_storage_opts()?;
 
     let memory = parse_memory_to_mb(&opts.memory.memory)?;
 
@@ -800,6 +972,11 @@ fn create_libvirt_domain_from_disk(
         domain_builder = domain_builder.with_metadata("bootc:label", &labels);
     }
 
+    // Add any additional metadata from caller
+    for (key, value) in &opts.metadata {
+        domain_builder = domain_builder.with_metadata(key, value);
+    }
+
     // Add secure boot configuration if enabled
     if let Some(ref sb_config) = secure_boot_config {
         let ovmf_code = crate::libvirt::secureboot::find_ovmf_code_secboot()
@@ -813,16 +990,16 @@ fn create_libvirt_domain_from_disk(
             domain_builder.with_metadata("bootc:secure-boot-keys", sb_config.key_dir.as_str());
     }
 
-    // Add user-specified volume mounts
-    if !opts.volumes.is_empty() {
-        debug!("Processing {} volume mount(s)", opts.volumes.len());
+    // Add user-specified raw volume mounts (manual virtiofs tags)
+    if !opts.raw_volumes.is_empty() {
+        debug!("Processing {} raw volume mount(s)", opts.raw_volumes.len());
 
-        for volume_str in opts.volumes.iter() {
+        for volume_str in opts.raw_volumes.iter() {
             let (host_path, tag) = parse_volume_mount(volume_str)
                 .with_context(|| format!("Failed to parse volume mount '{}'", volume_str))?;
 
             debug!(
-                "Adding volume mount: {} (host) with tag '{}'",
+                "Adding raw volume mount: {} (host) with tag '{}'",
                 host_path, tag
             );
 
@@ -835,6 +1012,29 @@ fn create_libvirt_domain_from_disk(
             domain_builder = domain_builder.with_virtiofs_filesystem(virtiofs_fs);
         }
     }
+
+    // Collect mount unit SMBIOS credentials and unit names
+    let mut mount_unit_smbios_creds = Vec::new();
+    let mut mount_unit_names = Vec::new();
+
+    // Process bind mounts (read-write and read-only)
+    domain_builder = process_bind_mounts(
+        &opts.bind_mounts,
+        "bcvk-bind-",
+        false,
+        domain_builder,
+        &mut mount_unit_smbios_creds,
+        &mut mount_unit_names,
+    )?;
+
+    domain_builder = process_bind_mounts(
+        &opts.bind_mounts_ro,
+        "bcvk-bind-ro-",
+        true,
+        domain_builder,
+        &mut mount_unit_smbios_creds,
+        &mut mount_unit_names,
+    )?;
 
     // Add container storage mount if requested
     if opts.bind_storage_ro {
@@ -861,13 +1061,54 @@ fn create_libvirt_domain_from_disk(
             .with_virtiofs_filesystem(virtiofs_fs)
             .with_metadata("bootc:bind-storage-ro", "true")
             .with_metadata("bootc:storage-path", storage_path.as_str());
+
+        // Generate mount unit for automatic mounting at /run/host-container-storage
+        let guest_mount_path = "/run/host-container-storage";
+        let unit_name = crate::sshcred::guest_path_to_unit_name(guest_mount_path);
+        let mount_unit_content =
+            crate::sshcred::generate_mount_unit("hoststorage", guest_mount_path, true);
+        let encoded_mount = data_encoding::BASE64.encode(mount_unit_content.as_bytes());
+        let mount_cred =
+            format!("io.systemd.credential.binary:systemd.extra-unit.{unit_name}={encoded_mount}");
+        mount_unit_smbios_creds.push(mount_cred);
+        mount_unit_names.push(unit_name);
     }
 
-    // Build QEMU args with port forwarding
+    // Create a single dropin for local-fs.target that wants all mount units
+    // This must be done AFTER all mount units have been added (including bind-storage-ro)
+    if !mount_unit_names.is_empty() {
+        let wants_list = mount_unit_names.join(" ");
+        let dropin_content = format!("[Unit]\nWants={}\n", wants_list);
+        let encoded_dropin = data_encoding::BASE64.encode(dropin_content.as_bytes());
+        let dropin_cred = format!(
+            "io.systemd.credential.binary:systemd.unit-dropin.local-fs.target~bcvk-mounts={encoded_dropin}"
+        );
+        mount_unit_smbios_creds.push(dropin_cred);
+    }
+
+    // Build QEMU args with all SMBIOS credentials
     let mut qemu_args = vec![
         "-smbios".to_string(),
         format!("type=11,value={}", smbios_cred),
     ];
+
+    // Add storage opts credentials (unit + dropin)
+    for storage_cred in storage_opts_creds {
+        qemu_args.push("-smbios".to_string());
+        qemu_args.push(format!("type=11,value={}", storage_cred));
+    }
+
+    // Add SMBIOS credentials for mount units
+    for mount_cred in mount_unit_smbios_creds {
+        qemu_args.push("-smbios".to_string());
+        qemu_args.push(format!("type=11,value={}", mount_cred));
+    }
+
+    // Add extra SMBIOS credentials from opts
+    for extra_cred in &opts.extra_smbios_credentials {
+        qemu_args.push("-smbios".to_string());
+        qemu_args.push(format!("type=11,value={}", extra_cred));
+    }
 
     // Build netdev user mode networking with port forwarding
     let mut hostfwd_args = vec![format!("tcp::{}-:22", ssh_port)];
