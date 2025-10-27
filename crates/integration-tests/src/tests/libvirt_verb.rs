@@ -480,6 +480,38 @@ fn cleanup_domain(domain_name: &str) {
     }
 }
 
+/// Check if libvirt supports readonly virtiofs (requires libvirt 11.0+)
+/// Returns true if supported, false if not supported
+fn check_libvirt_supports_readonly_virtiofs() -> Result<bool> {
+    let bck = get_bck_command()?;
+
+    println!("Checking libvirt capabilities...");
+    let status_output = Command::new(&bck)
+        .args(&["libvirt", "status", "--format", "json"])
+        .output()
+        .expect("Failed to get libvirt status");
+
+    if !status_output.status.success() {
+        let stderr = String::from_utf8_lossy(&status_output.stderr);
+        panic!("Failed to get libvirt status: {}", stderr);
+    }
+
+    let status: serde_json::Value =
+        serde_json::from_slice(&status_output.stdout).expect("Failed to parse libvirt status JSON");
+
+    let supports_readonly = status["supports_readonly_virtiofs"]
+        .as_bool()
+        .expect("Missing supports_readonly_virtiofs field in status output");
+
+    if !supports_readonly {
+        println!("Skipping test: libvirt does not support readonly virtiofs");
+        println!("libvirt version: {:?}", status["version"]);
+        println!("Requires libvirt 11.0+ for readonly virtiofs support");
+    }
+
+    Ok(supports_readonly)
+}
+
 /// Wait for SSH to become available on a domain with a timeout
 fn wait_for_ssh_available(
     domain_name: &str,
@@ -636,34 +668,12 @@ static TEST_LIBVIRT_RUN_BIND_STORAGE_RO: IntegrationTest = IntegrationTest::new(
 
 /// Test container storage binding functionality end-to-end
 fn test_libvirt_run_bind_storage_ro() -> Result<()> {
-    let bck = get_bck_command()?;
-    let test_image = get_test_image();
-
-    // First check if libvirt supports readonly virtiofs
-    println!("Checking libvirt capabilities...");
-    let status_output = Command::new(&bck)
-        .args(&["libvirt", "status", "--format", "json"])
-        .output()
-        .expect("Failed to get libvirt status");
-
-    if !status_output.status.success() {
-        let stderr = String::from_utf8_lossy(&status_output.stderr);
-        panic!("Failed to get libvirt status: {}", stderr);
-    }
-
-    let status: serde_json::Value =
-        serde_json::from_slice(&status_output.stdout).expect("Failed to parse libvirt status JSON");
-
-    let supports_readonly = status["supports_readonly_virtiofs"]
-        .as_bool()
-        .expect("Missing supports_readonly_virtiofs field in status output");
-
-    if !supports_readonly {
-        println!("Skipping test: libvirt does not support readonly virtiofs");
-        println!("libvirt version: {:?}", status["version"]);
-        println!("Requires libvirt 11.0+ for readonly virtiofs support");
+    // Check if libvirt supports readonly virtiofs (requires libvirt 11.0+)
+    if !check_libvirt_supports_readonly_virtiofs()? {
         return Ok(());
     }
+
+    let test_image = get_test_image();
 
     // Generate unique domain name for this test
     let domain_name = format!(
@@ -1158,6 +1168,11 @@ fn test_libvirt_run_bind_mounts() -> Result<()> {
     use camino::Utf8Path;
     use std::fs;
     use tempfile::TempDir;
+
+    // Check if libvirt supports readonly virtiofs (requires libvirt 11.0+)
+    if !check_libvirt_supports_readonly_virtiofs()? {
+        return Ok(());
+    }
 
     let test_image = get_test_image();
 
