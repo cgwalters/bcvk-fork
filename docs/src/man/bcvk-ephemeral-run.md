@@ -175,7 +175,28 @@ Development workflow example:
 
 # DEBUGGING
 
-When troubleshooting ephemeral VM issues, bcvk provides debugging logs that can be accessed from within the container.
+When troubleshooting ephemeral VM issues, bcvk provides several debugging logs that can be accessed from within the container.
+
+## Guest Journal Log
+
+The systemd journal from the guest VM is automatically streamed to `/run/journal.log` inside the container. This log captures all boot messages, service startup events, and system errors from the VM's perspective.
+
+To view the journal log:
+
+    # For a running detached VM
+    podman exec <container-id> tail -f /run/journal.log
+
+    # View specific systemd service messages
+    podman exec <container-id> grep "dbus-broker" /run/journal.log
+
+    # Save journal for offline analysis
+    podman exec <container-id> cat /run/journal.log > guest-journal.log
+
+The journal log is particularly useful for:
+- Diagnosing boot failures and systemd service issues
+- Investigating permission denied errors
+- Understanding VM initialization problems
+- Debugging network and device configuration
 
 ## Virtiofsd Logs
 

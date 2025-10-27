@@ -893,6 +893,35 @@ WantedBy=local-fs.target
     let default_wantsdir = format!("{target_unitdir}/default.target.wants");
     fs::create_dir_all(&default_wantsdir)?;
 
+    // Create systemd unit to stream journal to virtio-serial device
+    let journal_stream_unit = r#"[Unit]
+Description=Stream systemd journal to host via virtio-serial
+DefaultDependencies=no
+After=systemd-journald.service dev-virtio\x2dports-org.bcvk.journal.device
+Requires=systemd-journald.service dev-virtio\x2dports-org.bcvk.journal.device
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/journalctl -f -o short-precise --no-pager
+StandardOutput=file:/dev/virtio-ports/org.bcvk.journal
+StandardError=file:/dev/virtio-ports/org.bcvk.journal
+Restart=always
+RestartSec=1s
+
+[Install]
+WantedBy=sysinit.target
+"#;
+    let journal_unit_path = format!("{target_unitdir}/bcvk-journal-stream.service");
+    tokio::fs::write(&journal_unit_path, journal_stream_unit).await?;
+    debug!("Created journal streaming unit at {journal_unit_path}");
+
+    // Enable the journal streaming unit
+    let sysinit_wantsdir = format!("{target_unitdir}/sysinit.target.wants");
+    tokio::fs::create_dir_all(&sysinit_wantsdir).await?;
+    let journal_wants_link = format!("{sysinit_wantsdir}/bcvk-journal-stream.service");
+    tokio::fs::symlink("../bcvk-journal-stream.service", &journal_wants_link).await?;
+    debug!("Enabled journal streaming unit in sysinit.target.wants");
+
     match opts.common.execute.as_slice() {
         [] => {}
         elts => {
@@ -1094,6 +1123,10 @@ Options=
     qemu_config
         .set_kernel_cmdline(kernel_cmdline)
         .set_console(opts.common.console);
+
+    // Add virtio-serial device for journal streaming
+    qemu_config.add_virtio_serial_out("org.bcvk.journal", "/run/journal.log".to_string(), false);
+    debug!("Added virtio-serial device for journal streaming to /run/journal.log");
 
     if opts.common.ssh_keygen {
         qemu_config.enable_ssh_access(None); // Use default port 2222
