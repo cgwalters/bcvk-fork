@@ -363,95 +363,6 @@ fn test_libvirt_ssh_integration() -> Result<()> {
     Ok(())
 }
 
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_RUN_SSH_FULL_WORKFLOW: IntegrationTest = IntegrationTest::new(
-    "test_libvirt_run_ssh_full_workflow",
-    test_libvirt_run_ssh_full_workflow,
-);
-
-/// Test full libvirt run + SSH workflow like run_ephemeral SSH tests
-fn test_libvirt_run_ssh_full_workflow() -> Result<()> {
-    let test_image = get_test_image();
-
-    // Generate unique domain name for this test
-    let domain_name = format!(
-        "test-ssh-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-    );
-
-    println!(
-        "Testing full libvirt run + SSH workflow with domain: {}",
-        domain_name
-    );
-
-    // Cleanup any existing domain with this name
-    cleanup_domain(&domain_name);
-
-    // Create domain with SSH key generation
-    println!("Creating libvirt domain with SSH key injection...");
-    let create_output = run_bcvk(&[
-        "libvirt",
-        "run",
-        "--name",
-        &domain_name,
-        "--label",
-        LIBVIRT_INTEGRATION_TEST_LABEL,
-        "--filesystem",
-        "ext4",
-        "--karg",
-        "bcvk.test-install-karg=1",
-        &test_image,
-    ])
-    .expect("Failed to run libvirt run with SSH");
-
-    println!("Create stdout: {}", create_output.stdout);
-    println!("Create stderr: {}", create_output.stderr);
-
-    if !create_output.success() {
-        cleanup_domain(&domain_name);
-
-        panic!("Failed to create domain with SSH: {}", create_output.stderr);
-    }
-
-    println!("Successfully created domain: {}", domain_name);
-
-    // Wait for VM to boot and SSH to become available
-    println!("Waiting for VM to boot and SSH to become available...");
-    std::thread::sleep(std::time::Duration::from_secs(30));
-
-    // Test SSH connection and read kernel command line
-    println!("Testing SSH connection and validating karg");
-    let ssh_output = run_bcvk(&["libvirt", "ssh", &domain_name, "--", "cat", "/proc/cmdline"])
-        .expect("Failed to run libvirt ssh command");
-
-    println!("SSH stdout: {}", ssh_output.stdout);
-    println!("SSH stderr: {}", ssh_output.stderr);
-
-    // Cleanup domain before checking results
-    cleanup_domain(&domain_name);
-
-    // Check SSH results
-    if !ssh_output.success() {
-        panic!(
-            "SSH connection failed: {}\nkernel cmdline: {}",
-            ssh_output.stderr, ssh_output.stdout
-        );
-    }
-
-    // Verify we got the expected karg in /proc/cmdline
-    assert!(
-        ssh_output.stdout.contains("bcvk.test-install-karg=1"),
-        "Expected bcvk.test-install-karg=1 in kernel cmdline.\nActual cmdline: {}",
-        ssh_output.stdout
-    );
-
-    println!("✓ Full libvirt run + SSH workflow test passed");
-    Ok(())
-}
-
 /// Helper function to cleanup domain
 fn cleanup_domain(domain_name: &str) {
     println!("Cleaning up domain: {}", domain_name);
@@ -1164,6 +1075,7 @@ static TEST_LIBVIRT_RUN_BIND_MOUNTS: IntegrationTest =
     IntegrationTest::new("test_libvirt_run_bind_mounts", test_libvirt_run_bind_mounts);
 
 /// Test automatic bind mount functionality with systemd mount units
+/// Also validates kernel argument (--karg) functionality
 fn test_libvirt_run_bind_mounts() -> Result<()> {
     use camino::Utf8Path;
     use std::fs;
@@ -1185,7 +1097,7 @@ fn test_libvirt_run_bind_mounts() -> Result<()> {
             .as_secs()
     );
 
-    println!("Testing bind mounts with domain: {}", domain_name);
+    println!("Testing bind mounts and kargs with domain: {}", domain_name);
 
     // Create temporary directories for testing bind mounts
     let rw_dir = TempDir::new().expect("Failed to create read-write temp directory");
@@ -1204,8 +1116,8 @@ fn test_libvirt_run_bind_mounts() -> Result<()> {
     // Cleanup any existing domain with this name
     cleanup_domain(&domain_name);
 
-    // Create domain with bind mounts
-    println!("Creating libvirt domain with bind mounts...");
+    // Create domain with bind mounts and test karg
+    println!("Creating libvirt domain with bind mounts and karg...");
     let create_output = run_bcvk(&[
         "libvirt",
         "run",
@@ -1215,6 +1127,8 @@ fn test_libvirt_run_bind_mounts() -> Result<()> {
         LIBVIRT_INTEGRATION_TEST_LABEL,
         "--filesystem",
         "ext4",
+        "--karg",
+        "bcvk.test-install-karg=1",
         "--bind",
         &format!("{}:/var/mnt/test-rw", rw_dir_path),
         "--bind-ro",
@@ -1404,9 +1318,26 @@ fn test_libvirt_run_bind_mounts() -> Result<()> {
     );
     println!("✓ RO bind mount correctly rejects writes");
 
+    // Test kernel argument was applied
+    println!("Validating kernel argument...");
+    let cmdline_output = run_bcvk(&["libvirt", "ssh", &domain_name, "--", "cat", "/proc/cmdline"])
+        .expect("Failed to read kernel cmdline");
+
+    assert!(
+        cmdline_output.success(),
+        "Failed to read /proc/cmdline. stderr: {}",
+        cmdline_output.stderr
+    );
+    assert!(
+        cmdline_output.stdout.contains("bcvk.test-install-karg=1"),
+        "Expected bcvk.test-install-karg=1 in kernel cmdline.\nActual: {}",
+        cmdline_output.stdout
+    );
+    println!("✓ Kernel argument validated");
+
     // Cleanup domain
     cleanup_domain(&domain_name);
 
-    println!("✓ Bind mounts test passed");
+    println!("✓ Bind mounts and karg test passed");
     Ok(())
 }
