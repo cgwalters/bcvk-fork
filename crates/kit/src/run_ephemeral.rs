@@ -154,6 +154,13 @@ pub struct CommonPodmanOptions {
         help = "Add metadata to the container in key=value form"
     )]
     pub label: Vec<String>,
+
+    #[clap(
+        long = "env",
+        short = 'e',
+        help = "Set environment variables in the container (key=value)"
+    )]
+    pub env: Vec<String>,
 }
 
 /// Common VM configuration options for hardware, networking, and features.
@@ -400,6 +407,9 @@ fn prepare_run_command_with_temp(
     if opts.podman.detach {
         cmd.arg("-d");
     }
+    for env in opts.podman.env.iter() {
+        cmd.arg(format!("--env={env}"));
+    }
 
     let vhost_dev = Utf8Path::new(qemu::VHOST_VSOCK)
         .try_exists()?
@@ -461,11 +471,6 @@ fn prepare_run_command_with_temp(
     // Mount systemd units directory if specified
     if let Some(ref units_dir) = opts.systemd_units_dir {
         cmd.args(["-v", &format!("{}:/run/systemd-units:ro", units_dir)]);
-    }
-
-    // Propagate this by default
-    if let Some(log) = std::env::var("RUST_LOG").ok() {
-        cmd.arg(format!("--env=RUST_LOG={log}"));
     }
 
     // Pass configuration as JSON via BCK_CONFIG environment variable
