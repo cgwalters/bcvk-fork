@@ -190,11 +190,6 @@ fn create_vm(
     // We know vm exists because load_from_dir validates it
     let vm = config.vm.as_ref().unwrap();
 
-    // Check if libvirt supports readonly virtiofs for bind_storage_ro
-    let version = crate::libvirt::status::parse_libvirt_version()
-        .with_context(|| "Failed to check libvirt version")?;
-    let supports_readonly = crate::libvirt::status::supports_readonly_virtiofs(&version);
-
     let mut run_opts = LibvirtRunOpts {
         image: vm.image.clone(),
         name: Some(name.to_string()),
@@ -209,7 +204,7 @@ fn create_vm(
         network: vm.net.network.clone(),
         detach: !ssh, // Don't detach if we're going to SSH
         ssh,
-        bind_storage_ro: supports_readonly,
+        bind_storage_ro: true,
         firmware: FirmwareType::UefiSecure,
         disable_tpm: false,
         secure_boot_keys: None,
@@ -229,6 +224,7 @@ fn create_vm(
     }
 
     // Bind project directory to /run/src read-only with auto-mount
+    // (will fall back to read-write if libvirt doesn't support readonly virtiofs)
     run_opts.bind_mounts_ro.push(
         format!("{}:/run/src", project_dir.as_str())
             .parse()

@@ -818,30 +818,6 @@ fn process_bind_mounts(
     Ok(domain_builder)
 }
 
-/// Check if the libvirt version supports readonly virtiofs filesystems
-/// Requires libvirt 11.0+ and modern QEMU with rust-based virtiofsd
-fn check_libvirt_readonly_support() -> Result<()> {
-    let version = crate::libvirt::status::parse_libvirt_version()
-        .with_context(|| "Failed to check libvirt version")?;
-
-    if crate::libvirt::status::supports_readonly_virtiofs(&version) {
-        Ok(())
-    } else {
-        match version {
-            Some(v) => Err(color_eyre::eyre::eyre!(
-                "The --bind-storage-ro flag requires libvirt 11.0 or later for readonly virtiofs support. \
-                Current version: {}",
-                v.full_version
-            )),
-            None => Err(color_eyre::eyre::eyre!(
-                "Could not parse libvirt version. \
-                The --bind-storage-ro flag requires libvirt 11.0+ with rust-based virtiofsd support. \
-                Please ensure you have a compatible libvirt version installed."
-            ))
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1086,6 +1062,16 @@ fn create_libvirt_domain_from_disk(
     let mut mount_unit_smbios_creds = Vec::new();
     let mut mount_unit_names = Vec::new();
 
+    // Check if libvirt supports readonly virtiofs
+    let version = crate::libvirt::status::parse_libvirt_version()
+        .with_context(|| "Failed to check libvirt version")?;
+    let supports_readonly = crate::libvirt::status::supports_readonly_virtiofs(&version);
+
+    // Log once if we're falling back readonly mounts to read-write
+    if !supports_readonly && (!opts.bind_mounts_ro.is_empty() || opts.bind_storage_ro) {
+        info!("Libvirt version does not support readonly virtiofs; using read-write bind mounts");
+    }
+
     // Process bind mounts (read-write and read-only)
     domain_builder = process_bind_mounts(
         &opts.bind_mounts,
@@ -1096,20 +1082,30 @@ fn create_libvirt_domain_from_disk(
         &mut mount_unit_names,
     )?;
 
-    domain_builder = process_bind_mounts(
-        &opts.bind_mounts_ro,
-        "bcvk-bind-ro-",
-        true,
-        domain_builder,
-        &mut mount_unit_smbios_creds,
-        &mut mount_unit_names,
-    )?;
+    // Process readonly bind mounts - fall back to read-write if not supported
+    if supports_readonly {
+        domain_builder = process_bind_mounts(
+            &opts.bind_mounts_ro,
+            "bcvk-bind-ro-",
+            true,
+            domain_builder,
+            &mut mount_unit_smbios_creds,
+            &mut mount_unit_names,
+        )?;
+    } else {
+        // Fall back to read-write mounts
+        domain_builder = process_bind_mounts(
+            &opts.bind_mounts_ro,
+            "bcvk-bind-",
+            false,
+            domain_builder,
+            &mut mount_unit_smbios_creds,
+            &mut mount_unit_names,
+        )?;
+    }
 
     // Add container storage mount if requested
     if opts.bind_storage_ro {
-        // Check libvirt version compatibility for readonly virtiofs
-        check_libvirt_readonly_support().context("libvirt version compatibility check failed")?;
-
         let storage_path = crate::utils::detect_container_storage_path()
             .context("Failed to detect container storage path.")?;
         crate::utils::validate_container_storage_path(&storage_path)
@@ -1120,10 +1116,11 @@ fn create_libvirt_domain_from_disk(
             storage_path
         );
 
+        // Use readonly if supported, otherwise fall back to read-write
         let virtiofs_fs = VirtiofsFilesystem {
             source_dir: storage_path.to_string(),
             tag: "hoststorage".to_string(),
-            readonly: true,
+            readonly: supports_readonly,
         };
 
         domain_builder = domain_builder
