@@ -76,3 +76,18 @@ jobs:
             target/bcvk-*.tar.gz
             target/bcvk-*.tar.gz.sha256
           retention-days: 7
+
+  homebrew-formula:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+
+      - name: Test formula
+        run: |
+          brew tap bootc-dev/bcvk ${{ github.workspace }}
+          brew install --build-from-source --verbose bootc-dev/bcvk/bcvk
+          bcvk --help

@@ -3,7 +3,7 @@
 ## Prerequisites
 
 Required:
-- [Rust](https://www.rust-lang.org/)
+- [Rust](https://www.rust-lang.org/) (if building from source)
 - Git
 - QEMU/KVM
 - virtiofsd
@@ -15,6 +15,20 @@ Optional:
   sudo systemctl enable --now libvirtd
   sudo usermod -a -G libvirt $USER
   ```
+
+## Homebrew (Linux)
+
+Install from the bcvk tap:
+
+```bash
+brew install bootc-dev/bcvk/bcvk
+```
+
+Or install the latest development version:
+
+```bash
+brew install --HEAD bootc-dev/bcvk/bcvk
+```
 
 ## Building from Source
 
