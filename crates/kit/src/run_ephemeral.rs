@@ -1007,13 +1007,23 @@ StandardOutput=file:/dev/virtio-ports/executestatus
         qemu_config.add_smbios_credential(credential);
     }
     // Build kernel command line
-    let mut kernel_cmdline = vec![
-        "rootfstype=virtiofs".to_string(),
-        "root=rootfs".to_string(),
-        "rootflags=ro".to_string(),
-        "selinux=0".to_string(),
-        "systemd.volatile=overlay".to_string(),
-    ];
+    let mut kernel_cmdline = [
+        // At the core we boot from the mounted container's root,
+        "rootfstype=virtiofs",
+        "root=rootfs",
+        // But read-only, with an overlayfs in the VM backed
+        // by tmpfs
+        "rootflags=ro",
+        "systemd.volatile=overlay",
+        // This avoids having journald interact with the rootfs
+        // at all, which lessens the I/O traffic for virtiofs
+        "systemd.journald.storage=volatile",
+        // See https://github.com/bootc-dev/bcvk/issues/22
+        "selinux=0",
+    ]
+    .into_iter()
+    .map(ToOwned::to_owned)
+    .collect::<Vec<_>>();
 
     if opts.common.console {
         kernel_cmdline.push("console=hvc0".to_string());
