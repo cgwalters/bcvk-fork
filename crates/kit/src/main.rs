@@ -154,7 +154,11 @@ fn install_tracing() {
     use tracing_subscriber::prelude::*;
     use tracing_subscriber::EnvFilter;
 
-    let fmt_layer = fmt::layer().with_target(false).with_writer(std::io::stderr);
+    let format = fmt::format().without_time().with_target(false).compact();
+
+    let fmt_layer = fmt::layer()
+        .event_format(format)
+        .with_writer(std::io::stderr);
     let filter_layer = EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new("info"))
         .unwrap();
