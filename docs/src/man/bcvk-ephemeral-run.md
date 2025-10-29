@@ -107,6 +107,10 @@ This design allows bcvk to provide VM-like isolation and boot behavior while lev
 
     Add metadata to the container in key=value form
 
+**-e**, **--env**=*ENV*
+
+    Set environment variables in the container (key=value)
+
 **--bind**=*HOST_PATH[:NAME]*
 
     Bind mount host directory (RW) at /run/virtiofs-mnt-<name>
