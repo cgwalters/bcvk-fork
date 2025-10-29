@@ -19,6 +19,9 @@ pub struct ProjectDownOpts {
     /// Remove the VM after shutting it down
     #[clap(long)]
     pub remove: bool,
+
+    #[clap(long)]
+    pub force: bool,
 }
 
 /// Run the project down command
@@ -38,18 +41,31 @@ pub fn run(opts: ProjectDownOpts) -> Result<()> {
     };
 
     if !check_vm_exists(&vm_name, &libvirt_opts)? {
-        println!("Project VM '{}' does not exist", vm_name);
+        println!("Project is already down. vm_name: '{}'", vm_name);
         return Ok(());
     }
 
     // Stop the VM
     println!("Shutting down project VM '{}'...", vm_name);
-    stop_vm(&vm_name, &libvirt_opts)?;
+
+    let stop_opts = libvirt::stop::LibvirtStopOpts {
+        name: vm_name.to_string(),
+        force: opts.force,
+        timeout: 60,
+    };
+
+    let _ = libvirt::stop::run(&libvirt_opts, stop_opts);
 
     // Remove if requested
     if opts.remove {
         println!("Removing project VM '{}'...", vm_name);
-        remove_vm(&vm_name, &libvirt_opts)?;
+        let rm_opts = libvirt::rm::LibvirtRmOpts {
+            name: vm_name.to_string(),
+            force: opts.force,
+            stop: false,
+        };
+
+        libvirt::rm::run(&libvirt_opts, rm_opts)?
     }
 
     Ok(())
@@ -67,26 +83,4 @@ fn check_vm_exists(name: &str, libvirt_opts: &LibvirtOptions) -> Result<bool> {
     let domains = lister.list_bootc_domains()?;
 
     Ok(domains.iter().any(|d| d.name == name))
-}
-
-/// Stop a VM
-fn stop_vm(name: &str, libvirt_opts: &LibvirtOptions) -> Result<()> {
-    let stop_opts = libvirt::stop::LibvirtStopOpts {
-        name: name.to_string(),
-        force: false,
-        timeout: 60,
-    };
-
-    libvirt::stop::run(libvirt_opts, stop_opts)
-}
-
-/// Remove a VM
-fn remove_vm(name: &str, libvirt_opts: &LibvirtOptions) -> Result<()> {
-    let rm_opts = libvirt::rm::LibvirtRmOpts {
-        name: name.to_string(),
-        force: false,
-        stop: false,
-    };
-
-    libvirt::rm::run(libvirt_opts, rm_opts)
 }

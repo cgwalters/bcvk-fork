@@ -1003,7 +1003,7 @@ fn create_libvirt_domain_from_disk(
             opts.install
                 .filesystem
                 .as_ref()
-                .unwrap_or(&"ext4".to_string()),
+                .unwrap_or(&crate::libvirt::LIBVIRT_DEFAULT_FILESYSTEM.to_string()),
         )
         .with_metadata("bootc:network", &opts.network)
         .with_metadata("bootc:ssh-generated", "true")

@@ -21,6 +21,10 @@ Shut down the project VM
 
     Remove the VM after shutting it down
 
+**--force**
+
+    
+
 <!-- END GENERATED OPTIONS -->
 
 # EXAMPLES

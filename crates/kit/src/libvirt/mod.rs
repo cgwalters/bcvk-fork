@@ -23,6 +23,9 @@ pub const LIBVIRT_DEFAULT_MEMORY: &str = "4G";
 /// Default disk size for libvirt base disks
 pub const LIBVIRT_DEFAULT_DISK_SIZE: &str = "20G";
 
+/// Default filesystem for libvirt VMs
+pub const LIBVIRT_DEFAULT_FILESYSTEM: &str = "ext4";
+
 pub mod base_disks;
 pub mod base_disks_cli;
 pub mod domain;

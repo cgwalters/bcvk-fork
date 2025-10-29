@@ -219,9 +219,11 @@ fn create_vm(
         extra_smbios_credentials: vec![],
     };
 
-    if let Some(ref fs) = vm.filesystem {
-        run_opts.install.filesystem = Some(fs.clone());
-    }
+    run_opts.install.filesystem = Some(
+        vm.filesystem
+            .clone()
+            .unwrap_or_else(|| crate::libvirt::LIBVIRT_DEFAULT_FILESYSTEM.to_string()),
+    );
 
     // Bind project directory to /run/src read-only with auto-mount
     // (will fall back to read-write if libvirt doesn't support readonly virtiofs)
@@ -233,7 +235,7 @@ fn create_vm(
 
     // Add configured mounts using bind mount options
     for mount in config.mounts.iter().flatten() {
-        let mount_spec = format!("{}:{}", mount.host, mount.guest);
+        let mount_spec = format!("{}/{}:{}", project_dir.as_str(), mount.host, mount.guest);
         let bind_mount = mount_spec
             .parse()
             .with_context(|| format!("Failed to parse mount spec: {}", mount_spec))?;
