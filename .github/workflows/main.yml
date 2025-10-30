@@ -95,6 +95,9 @@ jobs:
         with:
           libvirt: 'true'
 
+      - name: Install additional dependencies
+        run: sudo apt install -y go-md2man dosfstools mtools
+
       - name: Extract image lists from Justfile
         run: |
           echo "PRIMARY_IMAGE=$(just --evaluate PRIMARY_IMAGE)" >> $GITHUB_ENV
