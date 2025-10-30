@@ -1006,7 +1006,7 @@ StandardOutput=file:/dev/virtio-ports/executestatus
         let key_pair = crate::ssh::generate_default_keypair()?;
         // Create credential and add to kernel args
         let pubkey = std::fs::read_to_string(key_pair.public_key_path.as_path())?;
-        let credential = crate::sshcred::smbios_cred_for_root_ssh(&pubkey)?;
+        let credential = crate::credentials::smbios_cred_for_root_ssh(&pubkey)?;
         qemu_config.add_smbios_credential(credential);
     }
     // Build kernel command line
