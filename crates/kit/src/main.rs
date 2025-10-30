@@ -10,6 +10,7 @@ mod arch;
 mod boot_progress;
 mod cache_metadata;
 mod cli_json;
+mod cloud_init;
 mod common_opts;
 mod container_entrypoint;
 pub(crate) mod containerenv;
@@ -27,6 +28,7 @@ mod podman;
 #[allow(dead_code)]
 mod qemu;
 mod qemu_img;
+mod repart;
 mod run_ephemeral;
 mod run_ephemeral_ssh;
 mod ssh;

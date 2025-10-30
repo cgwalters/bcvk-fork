@@ -139,6 +139,10 @@ This design allows bcvk to provide VM-like isolation and boot behavior while lev
 
     Additional kernel command line arguments
 
+**--cloud-init**=*PATH*
+
+    Path to cloud-config file (user-data) for cloud-init ConfigDrive
+
 <!-- END GENERATED OPTIONS -->
 
 # EXAMPLES

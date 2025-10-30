@@ -265,6 +265,13 @@ pub struct RunEphemeralOpts {
 
     #[clap(long = "karg", help = "Additional kernel command line arguments")]
     pub kernel_args: Vec<String>,
+
+    #[clap(
+        long = "cloud-init",
+        value_name = "PATH",
+        help = "Path to cloud-config file (user-data) for cloud-init ConfigDrive"
+    )]
+    pub cloud_init: Option<Utf8PathBuf>,
 }
 
 /// Launch privileged container with QEMU+KVM for ephemeral VM, spawning as subprocess.
@@ -491,6 +498,45 @@ fn prepare_run_command_with_temp(
         cmd.args(["-v", &format!("{}:{}:ro", unit_file, container_path)]);
     }
 
+    // Generate cloud-init ConfigDrive if provided
+    // This must happen on the host before entering the container, since we need
+    // mkfs.vfat and mtools which may not be available in the target bootc image.
+    // We create a uniquely-named file in the tempdir to avoid file locking conflicts when
+    // running tests in parallel. The file is cleaned up when the TempDir is dropped.
+    if let Some(ref cloud_init_file) = opts.cloud_init {
+        let cloud_init_path = std::path::Path::new(cloud_init_file.as_str());
+        if !cloud_init_path.exists() {
+            return Err(color_eyre::eyre::eyre!(
+                "Cloud-init config file does not exist: {}",
+                cloud_init_file
+            ));
+        }
+
+        debug!(
+            "Generating cloud-init ConfigDrive from: {}",
+            cloud_init_file
+        );
+
+        // Create a unique temporary file path in the tempdir
+        // We use a simple approach: generate a file in the existing tempdir
+        let configdrive_filename = format!("cloud-init-configdrive-{}.img", std::process::id());
+        let configdrive_path = Utf8PathBuf::from(td_path).join(configdrive_filename);
+
+        debug!("Creating ConfigDrive at: {}", configdrive_path);
+
+        // Generate the ConfigDrive on the host (before entering container)
+        crate::cloud_init::generate_configdrive_from_file(cloud_init_file, &configdrive_path)?;
+
+        debug!("Cloud-init ConfigDrive generated at: {}", configdrive_path);
+
+        // Mount the ConfigDrive into the container at a well-known location
+        // Note: We mount it as rw (not ro) because QEMU needs write access for file locking
+        cmd.args([
+            "-v",
+            &format!("{}:/run/cloud-init-configdrive.img:rw", configdrive_path),
+        ]);
+    }
+
     // Pass configuration as JSON via BCK_CONFIG environment variable
     // But first update add_unit paths to point to container paths
     let mut opts_for_container = opts.clone();
@@ -536,6 +582,8 @@ fn prepare_run_command_with_temp(
 
     cmd.args([&opts.image, ENTRYPOINT]);
 
+    // The TempDir will keep all temporary files (including cloud-init configdrive) alive
+    // until it's dropped at the end of the container's lifetime
     Ok((cmd, td))
 }
 
@@ -632,7 +680,6 @@ pub(crate) fn process_disk_files(
 
     Ok(processed_disks)
 }
-
 
 /// Parse exit code from systemd service status output
 fn parse_service_exit_code(status_content: &str) -> Result<i32> {
@@ -1002,12 +1049,33 @@ WantedBy=default.target
     let vsock_enabled = !vsock_force_disabled && qemu_config.enable_vsock().is_ok();
 
     // Handle SSH key generation and credential injection
+    let mut cloud_init_disk_path = None;
     if opts.common.ssh_keygen {
         let key_pair = crate::ssh::generate_default_keypair()?;
         // Create credential and add to kernel args
         let pubkey = std::fs::read_to_string(key_pair.public_key_path.as_path())?;
+
+        // Always use SMBIOS credential injection for SSH keys (not cloud-init)
         let credential = crate::credentials::smbios_cred_for_root_ssh(&pubkey)?;
         qemu_config.add_smbios_credential(credential);
+    }
+
+    // Handle cloud-init ConfigDrive if user provided a cloud-config file
+    // The ConfigDrive was already generated on the host in prepare_run_command_with_temp,
+    // and mounted into the container at /run/cloud-init-configdrive.img
+    if let Some(ref _cloud_init_path) = opts.cloud_init {
+        let configdrive_path = Utf8PathBuf::from("/run/cloud-init-configdrive.img");
+
+        if cloudinit {
+            debug!(
+                "Using pre-generated cloud-init ConfigDrive at: {}",
+                configdrive_path
+            );
+            cloud_init_disk_path = Some(configdrive_path);
+        } else {
+            debug!("Warning: --cloud-init provided but target image does not have cloud-init installed. ConfigDrive will be attached but may not be used.");
+            cloud_init_disk_path = Some(configdrive_path);
+        }
     }
     // Build kernel command line
     let mut kernel_cmdline = [
@@ -1031,10 +1099,8 @@ WantedBy=default.target
     if opts.common.console {
         kernel_cmdline.push("console=hvc0".to_string());
     }
-    if cloudinit {
-        // We don't provide any cloud-init datasource right now,
-        // though in the future it would make sense to do so,
-        // and switch over our SSH key injection.
+    if !cloudinit {
+        // If cloud-init is not installed, disable the datasource search
         kernel_cmdline.push("ds=iid-datasource-none".to_string());
     }
 
@@ -1185,6 +1251,16 @@ Options=
             blk_device.disk_file,
             blk_device.serial,
             blk_device.format,
+        );
+    }
+
+    // Attach cloud-init ConfigDrive if generated
+    if let Some(ref configdrive_path) = cloud_init_disk_path {
+        debug!("Attaching cloud-init ConfigDrive as virtio-blk device");
+        qemu_config.add_virtio_blk_device_with_format(
+            configdrive_path.to_string(),
+            "config-2".to_string(),
+            crate::to_disk::Format::Raw,
         );
     }
 

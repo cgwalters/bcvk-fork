@@ -113,6 +113,10 @@ Run ephemeral VM and SSH into it
 
     Additional kernel command line arguments
 
+**--cloud-init**=*PATH*
+
+    Path to cloud-config file (user-data) for cloud-init ConfigDrive
+
 <!-- END GENERATED OPTIONS -->
 
 # EXAMPLES
