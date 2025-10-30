@@ -93,9 +93,9 @@ Run ephemeral VM and SSH into it
 
     Bind mount host directory (RO) at /run/virtiofs-mnt-<name>
 
-**--systemd-units**=*SYSTEMD_UNITS_DIR*
+**--add-unit**=*FILE*
 
-    Directory with systemd units to inject (expects system/ subdirectory)
+    Inject a systemd unit file via SMBIOS credentials
 
 **--bind-storage-ro**
 

@@ -163,6 +163,67 @@ pub fn storage_opts_tmpfiles_d_lines() -> String {
     ).to_string()
 }
 
+/// Parse [Install] section from a systemd unit file and generate SMBIOS credentials for dropins
+///
+/// When units are injected via SMBIOS credentials (systemd.extra-unit.*), the [Install]
+/// section is not processed automatically by systemd. This function parses WantedBy and
+/// RequiredBy directives and generates appropriate dropins to establish these dependencies.
+///
+/// Returns a vector of SMBIOS credential strings for the dropins.
+pub fn smbios_creds_for_install_section(unit_name: &str, unit_content: &str) -> Vec<String> {
+    let mut credentials = Vec::new();
+    let mut in_install_section = false;
+    let mut wanted_by_targets = Vec::new();
+    let mut required_by_targets = Vec::new();
+
+    for line in unit_content.lines() {
+        let trimmed = line.trim();
+
+        // Track which section we're in
+        if trimmed.starts_with('[') {
+            in_install_section = trimmed.eq_ignore_ascii_case("[Install]");
+            continue;
+        }
+
+        if !in_install_section {
+            continue;
+        }
+
+        // Parse WantedBy= and RequiredBy= directives
+        if let Some(targets) = trimmed.strip_prefix("WantedBy=") {
+            wanted_by_targets.extend(targets.split_whitespace().map(String::from));
+        } else if let Some(targets) = trimmed.strip_prefix("RequiredBy=") {
+            required_by_targets.extend(targets.split_whitespace().map(String::from));
+        }
+    }
+
+    // Generate dropins for WantedBy targets
+    for target in wanted_by_targets {
+        let dropin_content = format!("[Unit]\nWants={}\n", unit_name);
+        let encoded = data_encoding::BASE64.encode(dropin_content.as_bytes());
+        let dropin_name = format!("bcvk-{}", unit_name.replace('.', "-"));
+        let cred = format!(
+            "io.systemd.credential.binary:systemd.unit-dropin.{}~{}={}",
+            target, dropin_name, encoded
+        );
+        credentials.push(cred);
+    }
+
+    // Generate dropins for RequiredBy targets
+    for target in required_by_targets {
+        let dropin_content = format!("[Unit]\nRequires={}\n", unit_name);
+        let encoded = data_encoding::BASE64.encode(dropin_content.as_bytes());
+        let dropin_name = format!("bcvk-{}", unit_name.replace('.', "-"));
+        let cred = format!(
+            "io.systemd.credential.binary:systemd.unit-dropin.{}~{}={}",
+            target, dropin_name, encoded
+        );
+        credentials.push(cred);
+    }
+
+    credentials
+}
+
 /// Generate SMBIOS credential string for root SSH access
 ///
 /// Creates a systemd credential for QEMU's SMBIOS interface. Preferred method
@@ -233,5 +294,60 @@ mod tests {
 
         // Test the actual function output
         assert_eq!(smbios_cred_for_root_ssh(STUBKEY).unwrap(), expected);
+    }
+
+    /// Test [Install] section parsing and dropin generation
+    #[test]
+    fn test_smbios_creds_for_install_section() {
+        let unit_content = r#"[Unit]
+Description=Test Service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+
+[Install]
+WantedBy=multi-user.target
+RequiredBy=sysinit.target
+"#;
+
+        let creds = smbios_creds_for_install_section("test.service", unit_content);
+        assert_eq!(creds.len(), 2);
+
+        // Check WantedBy dropin
+        let wants_cred = &creds[0];
+        assert!(wants_cred.starts_with(
+            "io.systemd.credential.binary:systemd.unit-dropin.multi-user.target~bcvk-test-service="
+        ));
+        // Extract base64 part - it's everything after "...~bcvk-test-service="
+        let wants_encoded = wants_cred.split_once("bcvk-test-service=").unwrap().1;
+        let wants_content =
+            String::from_utf8(BASE64.decode(wants_encoded.as_bytes()).unwrap()).unwrap();
+        assert_eq!(wants_content, "[Unit]\nWants=test.service\n");
+
+        // Check RequiredBy dropin
+        let requires_cred = &creds[1];
+        assert!(requires_cred.starts_with(
+            "io.systemd.credential.binary:systemd.unit-dropin.sysinit.target~bcvk-test-service="
+        ));
+        let requires_encoded = requires_cred.split_once("bcvk-test-service=").unwrap().1;
+        let requires_content =
+            String::from_utf8(BASE64.decode(requires_encoded.as_bytes()).unwrap()).unwrap();
+        assert_eq!(requires_content, "[Unit]\nRequires=test.service\n");
+    }
+
+    /// Test [Install] section with no directives
+    #[test]
+    fn test_smbios_creds_for_install_section_empty() {
+        let unit_content = r#"[Unit]
+Description=Test Service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+"#;
+
+        let creds = smbios_creds_for_install_section("test.service", unit_content);
+        assert_eq!(creds.len(), 0);
     }
 }

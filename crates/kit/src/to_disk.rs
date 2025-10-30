@@ -413,7 +413,7 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
         add_swap: Some(format!("{disk_size}")),
         bind_mounts: Vec::new(),    // No additional bind mounts needed
         ro_bind_mounts: Vec::new(), // No additional ro bind mounts needed
-        systemd_units_dir: None,    // No custom systemd units
+        add_unit: Vec::new(),       // No additional units to inject
         bind_storage_ro: true,      // Mount host container storage read-only
         mount_disk_files: vec![format!(
             "{}:output:{}",
