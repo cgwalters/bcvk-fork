@@ -137,6 +137,24 @@ This design allows bcvk to provide VM-like isolation and boot behavior while lev
 
 <!-- END GENERATED OPTIONS -->
 
+# ENVIRONMENT VARIABLES
+
+**BCVK_DISABLE_HOST_EXEC**
+
+    When set, disables mounting the host's `/usr` directory into the container.
+    By default, bcvk mounts the host's `/usr` directory (read-only) to provide
+    QEMU and other virtualization tools to the container. Setting this variable
+    requires that the container image provides its own QEMU and tooling.
+
+    This can be useful for:
+    - Running in environments where host /usr access is restricted
+    - Testing containers with their own complete toolchain
+    - Security scenarios requiring complete isolation from host binaries
+
+    Example:
+
+        BCVK_DISABLE_HOST_EXEC=1 bcvk ephemeral run quay.io/fedora/fedora-bootc:42
+
 # EXAMPLES
 
 Run an ephemeral VM in the background:

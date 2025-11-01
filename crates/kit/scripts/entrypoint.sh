@@ -9,14 +9,19 @@ init_tmproot() {
     mkdir /run/tmproot
     cd /run/tmproot
 
-    # Bind mount host /usr to our hybrid root
-    mkdir usr
-    mount --bind /run/hostusr usr
-    # Create essential symlinks
-    ln -sf usr/bin bin
-    ln -sf usr/lib lib
-    ln -sf usr/lib64 lib64
-    ln -sf usr/sbin sbin
+    # Bind mount host /usr to our hybrid root (unless disabled)
+    if [ -z "${BCVK_DISABLE_HOST_EXEC}" ] && [ -d "/run/hostusr" ]; then
+        mkdir usr
+        mount --bind /run/hostusr usr
+        # Create essential symlinks
+        ln -sf usr/bin bin
+        ln -sf usr/lib lib
+        ln -sf usr/lib64 lib64
+        ln -sf usr/sbin sbin
+    else
+        # When host exec is disabled, create directories but don't mount host /usr
+        mkdir -p {usr,bin,lib,lib64,sbin}
+    fi
     mkdir -p {etc,var,dev,proc,run,sys,tmp}
     # Ensure we have /etc/passwd as ssh-keygen wants it for bad reasons
     systemd-sysusers --root $(pwd) &>/dev/null

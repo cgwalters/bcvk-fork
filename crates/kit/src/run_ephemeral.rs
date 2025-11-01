@@ -75,10 +75,15 @@
 //! ## Security Model
 //!
 //! - **Privileged Container**: Required for KVM and namespace operations
-//! - **Read-only Host Access**: Host `/usr` mounted read-only
+//! - **Read-only Host Access**: Host `/usr` mounted read-only (can be disabled via `BCVK_DISABLE_HOST_EXEC`)
 //! - **SELinux**: Disabled within container only (`--security-opt=label=disable`)
 //! - **Network Isolation**: Default "none" unless explicitly configured
 //! - **VirtioFS Sandboxing**: Relies on VM isolation for security
+//!
+//! ## Environment Variables
+//!
+//! - `BCVK_DISABLE_HOST_EXEC`: When set, disables mounting host `/usr` into the container.
+//!   The container image must provide its own QEMU and other required tools.
 //!
 //! ## Configuration Passing
 //!
@@ -419,9 +424,14 @@ fn prepare_run_command_with_temp(
         "--device=/dev/kvm",
     ]);
     cmd.args(vhost_dev);
+
+    // Check if host exec should be disabled
+    let disable_host_exec = std::env::var("BCVK_DISABLE_HOST_EXEC").is_ok();
+    if !disable_host_exec {
+        cmd.args(["-v", "/usr:/run/hostusr:ro"]); // Bind mount host /usr as read-only
+    }
+
     cmd.args([
-        "-v",
-        "/usr:/run/hostusr:ro", // Bind mount host /usr as read-only
         "-v",
         &format!("{}:{}", entrypoint_path, ENTRYPOINT),
         "-v",
@@ -460,6 +470,11 @@ fn prepare_run_command_with_temp(
     // Propagate this by default
     if let Some(log) = std::env::var("RUST_LOG").ok() {
         cmd.arg(format!("--env=RUST_LOG={log}"));
+    }
+
+    // Propagate BCVK_DISABLE_HOST_EXEC if set
+    if disable_host_exec {
+        cmd.args(["-e", "BCVK_DISABLE_HOST_EXEC=1"]);
     }
 
     // Pass configuration as JSON via BCK_CONFIG environment variable
