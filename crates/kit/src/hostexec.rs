@@ -29,6 +29,13 @@ pub struct SystemdConfig {
 /// Returns None for host system (direct exec), Some(info) for valid container
 /// with --privileged and --pid=host, or error for insufficient privileges.
 fn ensure_hostexec_initialized() -> Result<Option<&'static ContainerExecutionInfo>> {
+    // Check if BCVK_HOSTEXEC is set to 0 - if so, disable container escape
+    if let Ok(val) = std::env::var("BCVK_HOSTEXEC") {
+        if val == "0" {
+            return Ok(None);
+        }
+    }
+
     // Check if we're in a toolbox environment - if so, we're on the host
     if std::env::var("TOOLBOX_PATH").is_ok() {
         return Ok(None);
