@@ -61,7 +61,7 @@ Run a bootable container as a persistent VM
 
     Set a kernel argument
 
-**--composefs-native**
+**--composefs-backend**
 
     Default to composefs-native storage
 
