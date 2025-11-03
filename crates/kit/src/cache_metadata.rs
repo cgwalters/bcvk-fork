@@ -37,7 +37,7 @@ struct CacheInputs {
     root_size: Option<String>,
 
     /// Whether to use composefs-native storage
-    composefs_native: bool,
+    composefs_backend: bool,
 
     /// Kernel arguments used during installation
     kernel_args: Vec<String>,
@@ -59,7 +59,7 @@ pub struct DiskImageMetadata {
     pub root_size: Option<String>,
 
     /// Whether to use composefs-native storage
-    pub composefs_native: bool,
+    pub composefs_backend: bool,
 
     /// Kernel arguments used during installation
     pub kernel_args: Vec<String>,
@@ -75,7 +75,7 @@ impl DiskImageMetadata {
             image_digest: self.digest.clone(),
             filesystem: self.filesystem.clone(),
             root_size: self.root_size.clone(),
-            composefs_native: self.composefs_native,
+            composefs_backend: self.composefs_backend,
             kernel_args: self.kernel_args.clone(),
             version: self.version,
         };
@@ -160,7 +160,7 @@ impl DiskImageMetadata {
             filesystem: options.filesystem.clone(),
             root_size: options.root_size.clone(),
             kernel_args: options.karg.clone(),
-            composefs_native: options.composefs_native,
+            composefs_backend: options.composefs_backend,
         }
     }
 }
@@ -291,7 +291,7 @@ mod tests {
             filesystem: Some("ext4".to_string()),
             root_size: Some("20G".to_string()),
             kernel_args: vec!["console=ttyS0".to_string()],
-            composefs_native: false,
+            composefs_backend: false,
             version: 1,
         };
 

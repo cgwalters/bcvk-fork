@@ -49,7 +49,7 @@ Upload bootc disk images to libvirt with metadata annotations
 
     Set a kernel argument
 
-**--composefs-native**
+**--composefs-backend**
 
     Default to composefs-native storage
 

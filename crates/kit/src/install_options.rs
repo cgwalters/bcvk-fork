@@ -35,7 +35,7 @@ pub struct InstallOptions {
 
     /// Default to composefs-native storage
     #[clap(long)]
-    pub composefs_native: bool,
+    pub composefs_backend: bool,
 }
 
 impl InstallOptions {
@@ -57,8 +57,8 @@ impl InstallOptions {
             args.push(format!("--karg={k}"));
         }
 
-        if self.composefs_native {
-            args.push("--composefs-native".to_owned());
+        if self.composefs_backend {
+            args.push("--composefs-backend".to_owned());
         }
 
         args
