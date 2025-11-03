@@ -13,7 +13,7 @@ use std::process::{Child, Command, Output, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use cap_std_ext::cmdext::CapStdExtCommandExt;
 use color_eyre::eyre::{eyre, Context};
 use color_eyre::Result;
@@ -382,10 +382,21 @@ fn spawn(
         config.memory_mb
     );
 
-    let qemu = std::env::var("QEMU_BIN").ok().unwrap_or_else(|| {
-        let arch = std::env::consts::ARCH;
-        format!("qemu-system-{arch}")
-    });
+    let qemu = std::env::var("QEMU_BIN")
+        .ok()
+        .map(Ok)
+        .unwrap_or_else(|| -> Result<_> {
+            // RHEL only supports non-emulated, and qemu is an implementation detail
+            // of higher level virt.
+            let libexec_qemu = Utf8Path::new("/usr/libexec/qemu-kvm");
+            if libexec_qemu.try_exists()? {
+                Ok(libexec_qemu.to_string())
+            } else {
+                let arch = std::env::consts::ARCH;
+                Ok(format!("qemu-system-{arch}"))
+            }
+        })
+        .context("Checking for qemu")?;
 
     let mut cmd = Command::new(qemu);
     // SAFETY: This API is safe to call in a forked child.
