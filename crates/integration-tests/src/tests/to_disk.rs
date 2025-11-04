@@ -16,14 +16,13 @@
 
 use camino::Utf8PathBuf;
 use color_eyre::Result;
+use integration_tests::integration_test;
 use linkme::distributed_slice;
+
 use std::process::Command;
 use tempfile::TempDir;
 
-use crate::{get_test_image, run_bcvk, IntegrationTest, INTEGRATION_TESTS, INTEGRATION_TEST_LABEL};
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_TO_DISK: IntegrationTest = IntegrationTest::new("to_disk", test_to_disk);
+use crate::{get_test_image, run_bcvk, INTEGRATION_TEST_LABEL};
 
 /// Test actual bootc installation to a disk image
 fn test_to_disk() -> Result<()> {
@@ -88,10 +87,7 @@ fn test_to_disk() -> Result<()> {
     );
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_TO_DISK_QCOW2: IntegrationTest =
-    IntegrationTest::new("to_disk_qcow2", test_to_disk_qcow2);
+integration_test!(test_to_disk);
 
 /// Test bootc installation to a qcow2 disk image
 fn test_to_disk_qcow2() -> Result<()> {
@@ -146,10 +142,7 @@ fn test_to_disk_qcow2() -> Result<()> {
     );
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_TO_DISK_CACHING: IntegrationTest =
-    IntegrationTest::new("to_disk_caching", test_to_disk_caching);
+integration_test!(test_to_disk_qcow2);
 
 /// Test disk image caching functionality
 fn test_to_disk_caching() -> Result<()> {
@@ -221,3 +214,4 @@ fn test_to_disk_caching() -> Result<()> {
     );
     Ok(())
 }
+integration_test!(test_to_disk_caching);

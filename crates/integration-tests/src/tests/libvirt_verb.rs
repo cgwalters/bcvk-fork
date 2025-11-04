@@ -8,20 +8,15 @@
 //! - Domain lifecycle management (start/stop/rm/inspect)
 
 use color_eyre::Result;
+use integration_tests::integration_test;
 use linkme::distributed_slice;
+
 use std::process::Command;
 
 use crate::{
-    get_bck_command, get_test_image, run_bcvk, run_bcvk_nocapture, IntegrationTest,
-    INTEGRATION_TESTS, LIBVIRT_INTEGRATION_TEST_LABEL,
+    get_bck_command, get_test_image, run_bcvk, run_bcvk_nocapture, LIBVIRT_INTEGRATION_TEST_LABEL,
 };
 use bcvk::xml_utils::parse_xml_dom;
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_LIST_FUNCTIONALITY: IntegrationTest = IntegrationTest::new(
-    "libvirt_list_functionality",
-    test_libvirt_list_functionality,
-);
 
 /// Test libvirt list functionality (lists domains)
 fn test_libvirt_list_functionality() -> Result<()> {
@@ -57,10 +52,7 @@ fn test_libvirt_list_functionality() -> Result<()> {
     println!("libvirt list functionality tested");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_LIST_JSON_OUTPUT: IntegrationTest =
-    IntegrationTest::new("libvirt_list_json_output", test_libvirt_list_json_output);
+integration_test!(test_libvirt_list_functionality);
 
 /// Test libvirt list with JSON output
 fn test_libvirt_list_json_output() -> Result<()> {
@@ -94,12 +86,7 @@ fn test_libvirt_list_json_output() -> Result<()> {
     println!("libvirt list JSON output tested");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_RUN_LIST_JSON_SSH_METADATA: IntegrationTest = IntegrationTest::new(
-    "test_libvirt_run_list_json_ssh_metadata",
-    test_libvirt_run_list_json_ssh_metadata,
-);
+integration_test!(test_libvirt_list_json_output);
 
 /// Test libvirt list JSON output includes SSH metadata
 fn test_libvirt_run_list_json_ssh_metadata() -> Result<()> {
@@ -235,12 +222,7 @@ fn test_libvirt_run_list_json_ssh_metadata() -> Result<()> {
     println!("✓ libvirt list JSON SSH metadata test passed");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_RUN_RESOURCE_OPTIONS: IntegrationTest = IntegrationTest::new(
-    "test_libvirt_run_resource_options",
-    test_libvirt_run_resource_options,
-);
+integration_test!(test_libvirt_run_list_json_ssh_metadata);
 
 /// Test domain resource configuration options
 fn test_libvirt_run_resource_options() -> Result<()> {
@@ -285,10 +267,7 @@ fn test_libvirt_run_resource_options() -> Result<()> {
     println!("libvirt run resource options validated");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_RUN_NETWORKING: IntegrationTest =
-    IntegrationTest::new("test_libvirt_run_networking", test_libvirt_run_networking);
+integration_test!(test_libvirt_run_resource_options);
 
 /// Test domain networking configuration
 fn test_libvirt_run_networking() -> Result<()> {
@@ -332,10 +311,7 @@ fn test_libvirt_run_networking() -> Result<()> {
     println!("libvirt run networking options validated");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_SSH_INTEGRATION: IntegrationTest =
-    IntegrationTest::new("test_libvirt_ssh_integration", test_libvirt_ssh_integration);
+integration_test!(test_libvirt_run_networking);
 
 /// Test SSH integration with created domains (syntax only)
 fn test_libvirt_ssh_integration() -> Result<()> {
@@ -362,12 +338,7 @@ fn test_libvirt_ssh_integration() -> Result<()> {
     println!("libvirt SSH integration tested");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_RUN_WITH_INSTANCETYPE: IntegrationTest = IntegrationTest::new(
-    "test_libvirt_run_with_instancetype",
-    test_libvirt_run_with_instancetype,
-);
+integration_test!(test_libvirt_ssh_integration);
 
 /// Test libvirt run with instancetype
 fn test_libvirt_run_with_instancetype() -> Result<()> {
@@ -453,6 +424,7 @@ fn test_libvirt_run_with_instancetype() -> Result<()> {
     println!("✓ libvirt run with instancetype test passed");
     Ok(())
 }
+integration_test!(test_libvirt_run_with_instancetype);
 
 /// Helper function to cleanup domain
 fn cleanup_domain(domain_name: &str) {
@@ -553,12 +525,6 @@ fn wait_for_ssh_available(
         std::thread::sleep(std::time::Duration::from_secs(5));
     }
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_RUN_VM_LIFECYCLE: IntegrationTest = IntegrationTest::new(
-    "test_libvirt_run_vm_lifecycle",
-    test_libvirt_run_vm_lifecycle,
-);
 
 /// Test VM startup and shutdown with libvirt run
 fn test_libvirt_run_vm_lifecycle() -> Result<()> {
@@ -661,12 +627,7 @@ fn test_libvirt_run_vm_lifecycle() -> Result<()> {
     println!("VM lifecycle test completed");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_RUN_BIND_STORAGE_RO: IntegrationTest = IntegrationTest::new(
-    "test_libvirt_run_bind_storage_ro",
-    test_libvirt_run_bind_storage_ro,
-);
+integration_test!(test_libvirt_run_vm_lifecycle);
 
 /// Test container storage binding functionality end-to-end
 fn test_libvirt_run_bind_storage_ro() -> Result<()> {
@@ -818,12 +779,7 @@ fn test_libvirt_run_bind_storage_ro() -> Result<()> {
     println!("✓ --bind-storage-ro end-to-end test passed");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_RUN_LABEL_FUNCTIONALITY: IntegrationTest = IntegrationTest::new(
-    "test_libvirt_run_label_functionality",
-    test_libvirt_run_label_functionality,
-);
+integration_test!(test_libvirt_run_bind_storage_ro);
 
 /// Test libvirt label functionality
 fn test_libvirt_run_label_functionality() -> Result<()> {
@@ -954,13 +910,7 @@ fn test_libvirt_run_label_functionality() -> Result<()> {
     println!("✓ Label functionality test passed");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_RUN_NO_STORAGE_OPTS_WITHOUT_BIND_STORAGE: IntegrationTest =
-    IntegrationTest::new(
-        "test_libvirt_run_no_storage_opts_without_bind_storage",
-        test_libvirt_run_no_storage_opts_without_bind_storage,
-    );
+integration_test!(test_libvirt_run_label_functionality);
 
 /// Test that STORAGE_OPTS credentials are NOT injected when --bind-storage-ro is not used
 fn test_libvirt_run_no_storage_opts_without_bind_storage() -> Result<()> {
@@ -1064,10 +1014,7 @@ fn test_libvirt_run_no_storage_opts_without_bind_storage() -> Result<()> {
     println!("✓ Test passed: STORAGE_OPTS credentials are correctly excluded when --bind-storage-ro is not used");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_ERROR_HANDLING: IntegrationTest =
-    IntegrationTest::new("test_libvirt_error_handling", test_libvirt_error_handling);
+integration_test!(test_libvirt_run_no_storage_opts_without_bind_storage);
 
 /// Test error handling for invalid configurations
 fn test_libvirt_error_handling() -> Result<()> {
@@ -1109,12 +1056,7 @@ fn test_libvirt_error_handling() -> Result<()> {
     println!("libvirt error handling validated");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_RUN_TRANSIENT_VM: IntegrationTest = IntegrationTest::new(
-    "test_libvirt_run_transient_vm",
-    test_libvirt_run_transient_vm,
-);
+integration_test!(test_libvirt_error_handling);
 
 /// Test transient VM functionality
 fn test_libvirt_run_transient_vm() -> Result<()> {
@@ -1270,10 +1212,7 @@ fn test_libvirt_run_transient_vm() -> Result<()> {
     println!("✓ Transient VM test passed");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_RUN_BIND_MOUNTS: IntegrationTest =
-    IntegrationTest::new("test_libvirt_run_bind_mounts", test_libvirt_run_bind_mounts);
+integration_test!(test_libvirt_run_transient_vm);
 
 /// Test automatic bind mount functionality with systemd mount units
 /// Also validates kernel argument (--karg) functionality
@@ -1542,3 +1481,4 @@ fn test_libvirt_run_bind_mounts() -> Result<()> {
     println!("✓ Bind mounts and karg test passed");
     Ok(())
 }
+integration_test!(test_libvirt_run_bind_mounts);

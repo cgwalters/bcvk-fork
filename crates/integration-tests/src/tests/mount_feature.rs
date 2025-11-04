@@ -16,11 +16,13 @@
 
 use camino::Utf8Path;
 use color_eyre::Result;
+use integration_tests::integration_test;
 use linkme::distributed_slice;
+
 use std::fs;
 use tempfile::TempDir;
 
-use crate::{get_test_image, run_bcvk, IntegrationTest, INTEGRATION_TESTS, INTEGRATION_TEST_LABEL};
+use crate::{get_test_image, run_bcvk, INTEGRATION_TEST_LABEL};
 
 /// Create a systemd unit that verifies a mount exists and tests writability
 fn create_mount_verify_unit(
@@ -67,10 +69,6 @@ StandardError=journal+console
     fs::write(&unit_path, unit_content)?;
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_MOUNT_FEATURE_BIND: IntegrationTest =
-    IntegrationTest::new("mount_feature_bind", test_mount_feature_bind);
 
 fn test_mount_feature_bind() -> Result<()> {
     // Create a temporary directory to test bind mounting
@@ -123,10 +121,7 @@ fn test_mount_feature_bind() -> Result<()> {
     println!("Successfully tested and verified bind mount feature");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_MOUNT_FEATURE_RO_BIND: IntegrationTest =
-    IntegrationTest::new("mount_feature_ro_bind", test_mount_feature_ro_bind);
+integration_test!(test_mount_feature_bind);
 
 fn test_mount_feature_ro_bind() -> Result<()> {
     // Create a temporary directory to test read-only bind mounting
@@ -173,3 +168,4 @@ fn test_mount_feature_ro_bind() -> Result<()> {
     assert!(output.stdout.contains("ok mount verify"));
     Ok(())
 }
+integration_test!(test_mount_feature_ro_bind);

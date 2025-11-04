@@ -15,11 +15,13 @@
 //! - Warning and continuing on failures
 
 use color_eyre::Result;
+use integration_tests::integration_test;
 use linkme::distributed_slice;
+
 use std::process::Command;
 use tracing::debug;
 
-use crate::{get_test_image, run_bcvk, IntegrationTest, INTEGRATION_TESTS, INTEGRATION_TEST_LABEL};
+use crate::{get_test_image, run_bcvk, INTEGRATION_TEST_LABEL};
 
 pub fn get_container_kernel_version(image: &str) -> String {
     // Run container to get its kernel version
@@ -44,12 +46,6 @@ pub fn get_container_kernel_version(image: &str) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_RUN_EPHEMERAL_CORRECT_KERNEL: IntegrationTest = IntegrationTest::new(
-    "run_ephemeral_correct_kernel",
-    test_run_ephemeral_correct_kernel,
-);
-
 fn test_run_ephemeral_correct_kernel() -> Result<()> {
     let image = get_test_image();
     let container_kernel = get_container_kernel_version(&image);
@@ -69,10 +65,7 @@ fn test_run_ephemeral_correct_kernel() -> Result<()> {
     output.assert_success("ephemeral run");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_RUN_EPHEMERAL_POWEROFF: IntegrationTest =
-    IntegrationTest::new("run_ephemeral_poweroff", test_run_ephemeral_poweroff);
+integration_test!(test_run_ephemeral_correct_kernel);
 
 fn test_run_ephemeral_poweroff() -> Result<()> {
     let output = run_bcvk(&[
@@ -89,12 +82,7 @@ fn test_run_ephemeral_poweroff() -> Result<()> {
     output.assert_success("ephemeral run");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_RUN_EPHEMERAL_WITH_MEMORY_LIMIT: IntegrationTest = IntegrationTest::new(
-    "run_ephemeral_with_memory_limit",
-    test_run_ephemeral_with_memory_limit,
-);
+integration_test!(test_run_ephemeral_poweroff);
 
 fn test_run_ephemeral_with_memory_limit() -> Result<()> {
     let output = run_bcvk(&[
@@ -113,10 +101,7 @@ fn test_run_ephemeral_with_memory_limit() -> Result<()> {
     output.assert_success("ephemeral run with memory limit");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_RUN_EPHEMERAL_WITH_VCPUS: IntegrationTest =
-    IntegrationTest::new("run_ephemeral_with_vcpus", test_run_ephemeral_with_vcpus);
+integration_test!(test_run_ephemeral_with_memory_limit);
 
 fn test_run_ephemeral_with_vcpus() -> Result<()> {
     let output = run_bcvk(&[
@@ -135,10 +120,7 @@ fn test_run_ephemeral_with_vcpus() -> Result<()> {
     output.assert_success("ephemeral run with vcpus");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_RUN_EPHEMERAL_EXECUTE: IntegrationTest =
-    IntegrationTest::new("run_ephemeral_execute", test_run_ephemeral_execute);
+integration_test!(test_run_ephemeral_with_vcpus);
 
 fn test_run_ephemeral_execute() -> Result<()> {
     let script =
@@ -176,12 +158,7 @@ fn test_run_ephemeral_execute() -> Result<()> {
     );
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_RUN_EPHEMERAL_CONTAINER_SSH_ACCESS: IntegrationTest = IntegrationTest::new(
-    "run_ephemeral_container_ssh_access",
-    test_run_ephemeral_container_ssh_access,
-);
+integration_test!(test_run_ephemeral_execute);
 
 fn test_run_ephemeral_container_ssh_access() -> Result<()> {
     let image = get_test_image();
@@ -228,12 +205,7 @@ fn test_run_ephemeral_container_ssh_access() -> Result<()> {
     assert!(ssh_output.stdout.contains("SSH_TEST_SUCCESS"));
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_RUN_EPHEMERAL_WITH_INSTANCETYPE: IntegrationTest = IntegrationTest::new(
-    "run_ephemeral_with_instancetype",
-    test_run_ephemeral_with_instancetype,
-);
+integration_test!(test_run_ephemeral_container_ssh_access);
 
 fn test_run_ephemeral_with_instancetype() -> Result<()> {
     // Test u1.nano: 1 vCPU, 512 MiB memory
@@ -296,12 +268,7 @@ fn test_run_ephemeral_with_instancetype() -> Result<()> {
 
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_RUN_EPHEMERAL_INSTANCETYPE_INVALID: IntegrationTest = IntegrationTest::new(
-    "run_ephemeral_instancetype_invalid",
-    test_run_ephemeral_instancetype_invalid,
-);
+integration_test!(test_run_ephemeral_with_instancetype);
 
 fn test_run_ephemeral_instancetype_invalid() -> Result<()> {
     let output = run_bcvk(&[
@@ -332,3 +299,4 @@ fn test_run_ephemeral_instancetype_invalid() -> Result<()> {
 
     Ok(())
 }
+integration_test!(test_run_ephemeral_instancetype_invalid);
