@@ -47,7 +47,6 @@ pub fn find_or_create_base_disk(
         )?
         .is_ok()
         {
-            info!("Found cached base disk: {:?}", base_disk_path);
             return Ok(base_disk_path);
         } else {
             info!("Base disk exists but metadata doesn't match, will recreate");
@@ -238,7 +237,7 @@ pub fn clone_from_base(
             .with_context(|| format!("Failed to remove disk file: {:?}", vm_disk_path))?;
     }
 
-    info!(
+    debug!(
         "Creating VM disk with backing file: {:?} -> {:?}",
         base_disk_path, vm_disk_path
     );
@@ -279,7 +278,7 @@ pub fn clone_from_base(
         ));
     }
 
-    info!(
+    debug!(
         "Successfully created VM disk with backing file: {:?}",
         vm_disk_path
     );

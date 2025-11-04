@@ -213,7 +213,7 @@ pub fn check_cached_disk(
 
     let matches = expected_hash == cached_hash;
     if matches {
-        tracing::info!(
+        tracing::debug!(
             "Found cached disk image at {:?} matching cache hash {}",
             path,
             expected_hash
