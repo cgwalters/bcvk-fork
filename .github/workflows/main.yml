@@ -28,6 +28,9 @@ jobs:
       - name: Remove pre-installed bcvk
         run: sudo rm -f /usr/bin/bcvk
 
+      - name: Install go-md2man for man page generation
+        run: sudo apt install -y go-md2man
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 

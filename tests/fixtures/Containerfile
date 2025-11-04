@@ -65,7 +65,7 @@ set -euo pipefail
 echo "Pulling test images..."
 podman pull -q quay.io/fedora/fedora-bootc:42 quay.io/centos-bootc/centos-bootc:stream9 quay.io/centos-bootc/centos-bootc:stream10
 echo "Running ephemeral integration tests..."
-exec /usr/local/bin/cargo-nextest run --archive-file integration-tests.tar.zst --workspace-remap /tests ephemeral
+exec /usr/local/bin/cargo-nextest nextest run --archive-file integration-tests.tar.zst --workspace-remap /tests ephemeral
 EOF
 RUN chmod +x /usr/local/bin/run-tests.sh
 
