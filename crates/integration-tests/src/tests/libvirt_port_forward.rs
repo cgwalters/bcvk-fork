@@ -6,19 +6,12 @@
 //! - Actual network connectivity through forwarded ports
 
 use color_eyre::Result;
+use integration_tests::integration_test;
 use linkme::distributed_slice;
+
 use std::process::Command;
 
-use crate::{
-    get_bck_command, get_test_image, run_bcvk, IntegrationTest, INTEGRATION_TESTS,
-    LIBVIRT_INTEGRATION_TEST_LABEL,
-};
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_PORT_FORWARD_PARSING: IntegrationTest = IntegrationTest::new(
-    "test_libvirt_port_forward_parsing",
-    test_libvirt_port_forward_parsing,
-);
+use crate::{get_bck_command, get_test_image, run_bcvk, LIBVIRT_INTEGRATION_TEST_LABEL};
 
 /// Test port forwarding argument parsing
 fn test_libvirt_port_forward_parsing() -> Result<()> {
@@ -63,12 +56,7 @@ fn test_libvirt_port_forward_parsing() -> Result<()> {
     println!("✓ Port forwarding argument parsing validated");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_PORT_FORWARD_INVALID: IntegrationTest = IntegrationTest::new(
-    "test_libvirt_port_forward_invalid",
-    test_libvirt_port_forward_invalid,
-);
+integration_test!(test_libvirt_port_forward_parsing);
 
 /// Test port forwarding error handling for invalid formats
 fn test_libvirt_port_forward_invalid() -> Result<()> {
@@ -134,12 +122,7 @@ fn test_libvirt_port_forward_invalid() -> Result<()> {
     println!("✓ Port forwarding error handling validated");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_PORT_FORWARD_XML: IntegrationTest = IntegrationTest::new(
-    "test_libvirt_port_forward_xml",
-    test_libvirt_port_forward_xml,
-);
+integration_test!(test_libvirt_port_forward_invalid);
 
 /// Test that port forwarding is correctly configured in domain XML
 fn test_libvirt_port_forward_xml() -> Result<()> {
@@ -247,12 +230,7 @@ fn test_libvirt_port_forward_xml() -> Result<()> {
     println!("✓ Port forwarding XML configuration test passed");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_LIBVIRT_PORT_FORWARD_CONNECTIVITY: IntegrationTest = IntegrationTest::new(
-    "test_libvirt_port_forward_connectivity",
-    test_libvirt_port_forward_connectivity,
-);
+integration_test!(test_libvirt_port_forward_xml);
 
 /// Test actual network connectivity through forwarded ports
 fn test_libvirt_port_forward_connectivity() -> Result<()> {
@@ -437,6 +415,7 @@ fn test_libvirt_port_forward_connectivity() -> Result<()> {
     println!("✓ Port forwarding connectivity test passed");
     Ok(())
 }
+integration_test!(test_libvirt_port_forward_connectivity);
 
 /// Helper function to cleanup domain
 fn cleanup_domain(domain_name: &str) {

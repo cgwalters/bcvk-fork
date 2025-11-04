@@ -7,17 +7,13 @@
 //! - base-disks prune command
 
 use color_eyre::Result;
+use integration_tests::integration_test;
 use linkme::distributed_slice;
+
 use regex::Regex;
 use std::process::Command;
 
-use crate::{get_bck_command, get_test_image, run_bcvk, IntegrationTest, INTEGRATION_TESTS};
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_BASE_DISK_CREATION_AND_REUSE: IntegrationTest = IntegrationTest::new(
-    "test_base_disk_creation_and_reuse",
-    test_base_disk_creation_and_reuse,
-);
+use crate::{get_bck_command, get_test_image, run_bcvk};
 
 /// Test that base disk is created and reused for multiple VMs
 fn test_base_disk_creation_and_reuse() -> Result<()> {
@@ -99,10 +95,7 @@ fn test_base_disk_creation_and_reuse() -> Result<()> {
     println!("✓ Base disk creation and reuse test passed");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_BASE_DISKS_LIST_COMMAND: IntegrationTest =
-    IntegrationTest::new("test_base_disks_list_command", test_base_disks_list_command);
+integration_test!(test_base_disk_creation_and_reuse);
 
 /// Test base-disks list command
 fn test_base_disks_list_command() -> Result<()> {
@@ -143,12 +136,7 @@ fn test_base_disks_list_command() -> Result<()> {
     }
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_BASE_DISKS_LIST_SHOWS_TIMESTAMP: IntegrationTest = IntegrationTest::new(
-    "test_base_disks_list_shows_timestamp",
-    test_base_disks_list_shows_timestamp,
-);
+integration_test!(test_base_disks_list_command);
 
 /// Test base-disks list shows creation timestamp
 fn test_base_disks_list_shows_timestamp() -> Result<()> {
@@ -218,12 +206,7 @@ fn test_base_disks_list_shows_timestamp() -> Result<()> {
     }
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_BASE_DISKS_PRUNE_DRY_RUN: IntegrationTest = IntegrationTest::new(
-    "test_base_disks_prune_dry_run",
-    test_base_disks_prune_dry_run,
-);
+integration_test!(test_base_disks_list_shows_timestamp);
 
 /// Test base-disks prune command with dry-run
 fn test_base_disks_prune_dry_run() -> Result<()> {
@@ -260,10 +243,7 @@ fn test_base_disks_prune_dry_run() -> Result<()> {
     }
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_VM_DISK_REFERENCES_BASE: IntegrationTest =
-    IntegrationTest::new("test_vm_disk_references_base", test_vm_disk_references_base);
+integration_test!(test_base_disks_prune_dry_run);
 
 /// Test that VM disks reference base disks correctly
 fn test_vm_disk_references_base() -> Result<()> {
@@ -336,6 +316,7 @@ fn test_vm_disk_references_base() -> Result<()> {
     println!("✓ VM disk reference test passed");
     Ok(())
 }
+integration_test!(test_vm_disk_references_base);
 
 /// Helper function to cleanup domain and its disk
 fn cleanup_domain(domain_name: &str) {

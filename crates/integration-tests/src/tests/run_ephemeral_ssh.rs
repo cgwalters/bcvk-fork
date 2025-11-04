@@ -15,19 +15,17 @@
 //! - Warning and continuing on failures
 
 use color_eyre::Result;
+use integration_tests::integration_test;
 use linkme::distributed_slice;
+
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
 use crate::{
-    get_test_image, run_bcvk, IntegrationTest, ParameterizedIntegrationTest, INTEGRATION_TESTS,
-    INTEGRATION_TEST_LABEL, PARAMETERIZED_INTEGRATION_TESTS,
+    get_test_image, run_bcvk, ParameterizedIntegrationTest, INTEGRATION_TEST_LABEL,
+    PARAMETERIZED_INTEGRATION_TESTS,
 };
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_RUN_EPHEMERAL_SSH_COMMAND: IntegrationTest =
-    IntegrationTest::new("run_ephemeral_ssh_command", test_run_ephemeral_ssh_command);
 
 /// Test running a non-interactive command via SSH
 fn test_run_ephemeral_ssh_command() -> Result<()> {
@@ -51,10 +49,7 @@ fn test_run_ephemeral_ssh_command() -> Result<()> {
     );
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_RUN_EPHEMERAL_SSH_CLEANUP: IntegrationTest =
-    IntegrationTest::new("run_ephemeral_ssh_cleanup", test_run_ephemeral_ssh_cleanup);
+integration_test!(test_run_ephemeral_ssh_command);
 
 /// Test that the container is cleaned up when SSH exits
 fn test_run_ephemeral_ssh_cleanup() -> Result<()> {
@@ -91,12 +86,7 @@ fn test_run_ephemeral_ssh_cleanup() -> Result<()> {
     );
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_RUN_EPHEMERAL_SSH_SYSTEM_COMMAND: IntegrationTest = IntegrationTest::new(
-    "run_ephemeral_ssh_system_command",
-    test_run_ephemeral_ssh_system_command,
-);
+integration_test!(test_run_ephemeral_ssh_cleanup);
 
 /// Test running system commands via SSH
 fn test_run_ephemeral_ssh_system_command() -> Result<()> {
@@ -115,12 +105,7 @@ fn test_run_ephemeral_ssh_system_command() -> Result<()> {
     output.assert_success("ephemeral run-ssh");
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_RUN_EPHEMERAL_SSH_EXIT_CODE: IntegrationTest = IntegrationTest::new(
-    "run_ephemeral_ssh_exit_code",
-    test_run_ephemeral_ssh_exit_code,
-);
+integration_test!(test_run_ephemeral_ssh_system_command);
 
 /// Test that ephemeral run-ssh properly forwards exit codes
 fn test_run_ephemeral_ssh_exit_code() -> Result<()> {
@@ -143,6 +128,7 @@ fn test_run_ephemeral_ssh_exit_code() -> Result<()> {
     );
     Ok(())
 }
+integration_test!(test_run_ephemeral_ssh_exit_code);
 
 #[distributed_slice(PARAMETERIZED_INTEGRATION_TESTS)]
 static TEST_RUN_EPHEMERAL_SSH_CROSS_DISTRO_COMPATIBILITY: ParameterizedIntegrationTest =
@@ -204,9 +190,6 @@ fn test_run_ephemeral_ssh_cross_distro_compatibility(image: &str) -> Result<()> 
     }
     Ok(())
 }
-
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_RUN_TMPFS: IntegrationTest = IntegrationTest::new("run_tmpfs", test_run_tmpfs);
 
 /// Test that /run is mounted as tmpfs and supports unix domain sockets
 fn test_run_tmpfs() -> Result<()> {
@@ -274,3 +257,4 @@ echo "All checks passed!"
 
     Ok(())
 }
+integration_test!(test_run_tmpfs);

@@ -60,6 +60,56 @@ pub static INTEGRATION_TESTS: [IntegrationTest];
 #[distributed_slice]
 pub static PARAMETERIZED_INTEGRATION_TESTS: [ParameterizedIntegrationTest];
 
+/// Register an integration test with less boilerplate.
+///
+/// This macro generates the static registration for an integration test function.
+///
+/// # Examples
+///
+/// ```ignore
+/// fn test_basic_functionality() -> Result<()> {
+///     let output = run_bcvk(&["some", "args"])?;
+///     output.assert_success("test");
+///     Ok(())
+/// }
+/// integration_test!(test_basic_functionality);
+/// ```
+#[macro_export]
+macro_rules! integration_test {
+    ($fn_name:ident) => {
+        ::paste::paste! {
+            #[distributed_slice($crate::INTEGRATION_TESTS)]
+            static [<$fn_name:upper>]: $crate::IntegrationTest =
+                $crate::IntegrationTest::new(stringify!($fn_name), $fn_name);
+        }
+    };
+}
+
+/// Register a parameterized integration test with less boilerplate.
+///
+/// This macro generates the static registration for a parameterized integration test function.
+///
+/// # Examples
+///
+/// ```ignore
+/// fn test_with_image(image: &str) -> Result<()> {
+///     let output = run_bcvk(&["command", image])?;
+///     output.assert_success("test");
+///     Ok(())
+/// }
+/// parameterized_integration_test!(test_with_image);
+/// ```
+#[macro_export]
+macro_rules! parameterized_integration_test {
+    ($fn_name:ident) => {
+        ::paste::paste! {
+            #[distributed_slice($crate::PARAMETERIZED_INTEGRATION_TESTS)]
+            static [<$fn_name:upper>]: $crate::ParameterizedIntegrationTest =
+                $crate::ParameterizedIntegrationTest::new(stringify!($fn_name), $fn_name);
+        }
+    };
+}
+
 /// Create a test suffix from an image name by replacing invalid characters with underscores
 ///
 /// Replaces all non-alphanumeric characters with `_` to create a predictable, filesystem-safe
