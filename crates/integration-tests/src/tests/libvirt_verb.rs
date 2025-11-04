@@ -956,6 +956,116 @@ fn test_libvirt_run_label_functionality() -> Result<()> {
 }
 
 #[distributed_slice(INTEGRATION_TESTS)]
+static TEST_LIBVIRT_RUN_NO_STORAGE_OPTS_WITHOUT_BIND_STORAGE: IntegrationTest =
+    IntegrationTest::new(
+        "test_libvirt_run_no_storage_opts_without_bind_storage",
+        test_libvirt_run_no_storage_opts_without_bind_storage,
+    );
+
+/// Test that STORAGE_OPTS credentials are NOT injected when --bind-storage-ro is not used
+fn test_libvirt_run_no_storage_opts_without_bind_storage() -> Result<()> {
+    let test_image = get_test_image();
+
+    // Generate unique domain name for this test
+    let domain_name = format!(
+        "test-no-storage-opts-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    );
+
+    println!(
+        "Testing that STORAGE_OPTS are not injected without --bind-storage-ro for domain: {}",
+        domain_name
+    );
+
+    // Cleanup any existing domain with this name
+    cleanup_domain(&domain_name);
+
+    // Create domain WITHOUT --bind-storage-ro flag
+    println!("Creating libvirt domain without --bind-storage-ro...");
+    let create_output = run_bcvk(&[
+        "libvirt",
+        "run",
+        "--name",
+        &domain_name,
+        "--label",
+        LIBVIRT_INTEGRATION_TEST_LABEL,
+        "--filesystem",
+        "ext4",
+        &test_image,
+    ])
+    .expect("Failed to run libvirt run");
+
+    println!("Create stdout: {}", create_output.stdout);
+    println!("Create stderr: {}", create_output.stderr);
+
+    if !create_output.success() {
+        cleanup_domain(&domain_name);
+        panic!(
+            "Failed to create domain without --bind-storage-ro: {}",
+            create_output.stderr
+        );
+    }
+
+    println!("Successfully created domain: {}", domain_name);
+
+    // Dump the domain XML to verify STORAGE_OPTS credentials are not present
+    println!("Dumping domain XML to verify no STORAGE_OPTS credentials...");
+    let dumpxml_output = Command::new("virsh")
+        .args(&["dumpxml", &domain_name])
+        .output()
+        .expect("Failed to dump domain XML");
+
+    if !dumpxml_output.status.success() {
+        cleanup_domain(&domain_name);
+        let stderr = String::from_utf8_lossy(&dumpxml_output.stderr);
+        panic!("Failed to dump domain XML: {}", stderr);
+    }
+
+    let domain_xml = String::from_utf8_lossy(&dumpxml_output.stdout);
+
+    // Verify that the domain XML does NOT contain STORAGE_OPTS related credentials
+    // The bugfix ensures storage_opts_tmpfiles_d_lines() is only added when --bind-storage-ro is true
+    // These credentials appear as SMBIOS entries in the domain XML
+
+    // Check that bcvk-storage-opts is NOT present (this is the systemd unit name)
+    assert!(
+        !domain_xml.contains("bcvk-storage-opts"),
+        "Domain XML should NOT contain bcvk-storage-opts unit when --bind-storage-ro is not used. Found in XML."
+    );
+    println!("✓ Domain XML does not contain bcvk-storage-opts unit reference");
+
+    // Check that STORAGE_OPTS environment variable is NOT present in SMBIOS credentials
+    assert!(
+        !domain_xml.contains("STORAGE_OPTS"),
+        "Domain XML should NOT contain STORAGE_OPTS environment variable when --bind-storage-ro is not used. Found in XML."
+    );
+    println!("✓ Domain XML does not contain STORAGE_OPTS environment variable");
+
+    // Verify that hoststorage virtiofs tag is NOT present
+    assert!(
+        !domain_xml.contains("hoststorage"),
+        "Domain XML should NOT contain hoststorage virtiofs tag when --bind-storage-ro is not used. Found in XML."
+    );
+    println!("✓ Domain XML does not contain hoststorage virtiofs filesystem");
+
+    // Verify that bind-storage-ro metadata is NOT present
+    assert!(
+        !domain_xml.contains("bootc:bind-storage-ro"),
+        "Domain XML should NOT contain bind-storage-ro metadata when flag is not used. Found in XML."
+    );
+    println!("✓ Domain XML does not contain bind-storage-ro metadata");
+
+    // Cleanup domain
+    cleanup_domain(&domain_name);
+
+    println!("✓ Test passed: STORAGE_OPTS credentials are correctly excluded when --bind-storage-ro is not used");
+    Ok(())
+}
+
+#[distributed_slice(INTEGRATION_TESTS)]
 static TEST_LIBVIRT_ERROR_HANDLING: IntegrationTest =
     IntegrationTest::new("test_libvirt_error_handling", test_libvirt_error_handling);
 

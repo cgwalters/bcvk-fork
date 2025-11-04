@@ -961,12 +961,6 @@ fn create_libvirt_domain_from_disk(
     // Generate SMBIOS credential for SSH key injection and systemd environment configuration
     // Combine SSH key setup and storage opts for systemd contexts
     let mut tmpfiles_content = crate::credentials::key_to_root_tmpfiles_d(&public_key_content);
-    tmpfiles_content.push_str(&crate::credentials::storage_opts_tmpfiles_d_lines());
-    let encoded = data_encoding::BASE64.encode(tmpfiles_content.as_bytes());
-    let smbios_cred = format!("io.systemd.credential.binary:tmpfiles.extra={encoded}");
-
-    // Generate SMBIOS credentials for storage opts unit (handles /etc/environment for PAM/SSH)
-    let storage_opts_creds = crate::credentials::smbios_creds_for_storage_opts()?;
 
     let memory = opts.resolved_memory_mb()?;
     let cpus = opts.resolved_cpus()?;
@@ -1063,8 +1057,8 @@ fn create_libvirt_domain_from_disk(
         }
     }
 
-    // Collect mount unit SMBIOS credentials and unit names
-    let mut mount_unit_smbios_creds = Vec::new();
+    // Collect SMBIOS credentials and mount unit names
+    let mut smbios_creds = Vec::new();
     let mut mount_unit_names = Vec::new();
 
     // Process bind mounts (read-write and read-only)
@@ -1073,7 +1067,7 @@ fn create_libvirt_domain_from_disk(
         "bcvk-bind-",
         false,
         domain_builder,
-        &mut mount_unit_smbios_creds,
+        &mut smbios_creds,
         &mut mount_unit_names,
     )?;
 
@@ -1082,7 +1076,7 @@ fn create_libvirt_domain_from_disk(
         "bcvk-bind-ro-",
         true,
         domain_builder,
-        &mut mount_unit_smbios_creds,
+        &mut smbios_creds,
         &mut mount_unit_names,
     )?;
 
@@ -1120,8 +1114,15 @@ fn create_libvirt_domain_from_disk(
         let encoded_mount = data_encoding::BASE64.encode(mount_unit_content.as_bytes());
         let mount_cred =
             format!("io.systemd.credential.binary:systemd.extra-unit.{unit_name}={encoded_mount}");
-        mount_unit_smbios_creds.push(mount_cred);
+        smbios_creds.push(mount_cred);
         mount_unit_names.push(unit_name);
+
+        // Add tmpfiles.d lines and systemd service credentials for STORAGE_OPTS
+        tmpfiles_content.push_str(&crate::credentials::storage_opts_tmpfiles_d_lines());
+        smbios_creds.extend(
+            crate::credentials::smbios_creds_for_storage_opts()
+                .context("Failed to generate storage opts credentials")?,
+        );
     }
 
     // Create a single dropin for local-fs.target that wants all mount units
@@ -1133,25 +1134,25 @@ fn create_libvirt_domain_from_disk(
         let dropin_cred = format!(
             "io.systemd.credential.binary:systemd.unit-dropin.local-fs.target~bcvk-mounts={encoded_dropin}"
         );
-        mount_unit_smbios_creds.push(dropin_cred);
+        smbios_creds.push(dropin_cred);
     }
+
+    let mut qemu_args = Vec::new();
 
     // Build QEMU args with all SMBIOS credentials
-    let mut qemu_args = vec![
-        "-smbios".to_string(),
-        format!("type=11,value={}", smbios_cred),
-    ];
-
-    // Add storage opts credentials (unit + dropin)
-    for storage_cred in storage_opts_creds {
-        qemu_args.push("-smbios".to_string());
-        qemu_args.push(format!("type=11,value={}", storage_cred));
+    {
+        let encoded = data_encoding::BASE64.encode(tmpfiles_content.as_bytes());
+        let smbios_cred = format!("io.systemd.credential.binary:tmpfiles.extra={encoded}");
+        qemu_args.extend([
+            "-smbios".to_string(),
+            format!("type=11,value={}", smbios_cred),
+        ]);
     }
 
-    // Add SMBIOS credentials for mount units
-    for mount_cred in mount_unit_smbios_creds {
+    // Add all SMBIOS credentials (mount units, storage opts, etc.)
+    for cred in smbios_creds {
         qemu_args.push("-smbios".to_string());
-        qemu_args.push(format!("type=11,value={}", mount_cred));
+        qemu_args.push(format!("type=11,value={}", cred));
     }
 
     // Add extra SMBIOS credentials from opts
