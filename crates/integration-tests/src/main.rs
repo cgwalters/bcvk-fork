@@ -11,10 +11,9 @@ use xshell::{cmd, Shell};
 
 // Re-export constants from lib for internal use
 pub(crate) use integration_tests::{
-    image_to_test_suffix, IntegrationTest, ParameterizedIntegrationTest, INTEGRATION_TESTS,
-    INTEGRATION_TEST_LABEL, LIBVIRT_INTEGRATION_TEST_LABEL, PARAMETERIZED_INTEGRATION_TESTS,
+    image_to_test_suffix, integration_test, INTEGRATION_TESTS, INTEGRATION_TEST_LABEL,
+    LIBVIRT_INTEGRATION_TEST_LABEL, PARAMETERIZED_INTEGRATION_TESTS,
 };
-use linkme::distributed_slice;
 
 mod tests {
     pub mod libvirt_base_disks;
@@ -144,9 +143,6 @@ pub(crate) fn run_bcvk_nocapture(args: &[&str]) -> std::io::Result<()> {
     Ok(())
 }
 
-#[distributed_slice(INTEGRATION_TESTS)]
-static TEST_IMAGES_LIST: IntegrationTest = IntegrationTest::new("images_list", test_images_list);
-
 fn test_images_list() -> Result<()> {
     println!("Running test: bcvk images list --json");
 
@@ -188,6 +184,7 @@ fn test_images_list() -> Result<()> {
     println!("All image entries are valid JSON objects");
     Ok(())
 }
+integration_test!(test_images_list);
 
 fn main() {
     let args = Arguments::from_args();

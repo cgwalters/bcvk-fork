@@ -15,17 +15,13 @@
 //! - Warning and continuing on failures
 
 use color_eyre::Result;
-use integration_tests::integration_test;
-use linkme::distributed_slice;
+use integration_tests::{integration_test, parameterized_integration_test};
 
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
-use crate::{
-    get_test_image, run_bcvk, ParameterizedIntegrationTest, INTEGRATION_TEST_LABEL,
-    PARAMETERIZED_INTEGRATION_TESTS,
-};
+use crate::{get_test_image, run_bcvk, INTEGRATION_TEST_LABEL};
 
 /// Test running a non-interactive command via SSH
 fn test_run_ephemeral_ssh_command() -> Result<()> {
@@ -130,13 +126,6 @@ fn test_run_ephemeral_ssh_exit_code() -> Result<()> {
 }
 integration_test!(test_run_ephemeral_ssh_exit_code);
 
-#[distributed_slice(PARAMETERIZED_INTEGRATION_TESTS)]
-static TEST_RUN_EPHEMERAL_SSH_CROSS_DISTRO_COMPATIBILITY: ParameterizedIntegrationTest =
-    ParameterizedIntegrationTest::new(
-        "run_ephemeral_ssh_cross_distro_compatibility",
-        test_run_ephemeral_ssh_cross_distro_compatibility,
-    );
-
 /// Test SSH functionality across different bootc images
 /// This parameterized test runs once per image in BCVK_ALL_IMAGES and verifies
 /// that our systemd version compatibility fix works correctly with both newer
@@ -190,6 +179,7 @@ fn test_run_ephemeral_ssh_cross_distro_compatibility(image: &str) -> Result<()> 
     }
     Ok(())
 }
+parameterized_integration_test!(test_run_ephemeral_ssh_cross_distro_compatibility);
 
 /// Test that /run is mounted as tmpfs and supports unix domain sockets
 fn test_run_tmpfs() -> Result<()> {
