@@ -272,6 +272,7 @@ fn test_libvirt_port_forward_connectivity() -> Result<()> {
         &format!("{}:8080", host_port),
         "--filesystem",
         "ext4",
+        "--ssh-wait",
         &test_image,
     ])
     .expect("Failed to run libvirt run with port forwarding");
@@ -289,12 +290,8 @@ fn test_libvirt_port_forward_connectivity() -> Result<()> {
 
     println!("Successfully created domain: {}", domain_name);
 
-    // Wait for VM to boot and SSH to become available
-    println!("Waiting for VM to boot and SSH to become available...");
-    if let Err(e) = wait_for_ssh_available(&domain_name, 180) {
-        cleanup_domain(&domain_name);
-        panic!("Failed to establish SSH connection: {}", e);
-    }
+    // SSH is already available due to --ssh-wait flag
+    println!("✓ SSH is ready (via --ssh-wait)");
 
     // Start a simple HTTP server on port 8080 inside the VM using Python
     println!("Starting HTTP server on port 8080 inside VM...");
@@ -442,56 +439,6 @@ fn cleanup_domain(domain_name: &str) {
             let stderr = String::from_utf8_lossy(&output.stderr);
             println!("Cleanup warning (may be expected): {}", stderr);
         }
-    }
-}
-
-/// Wait for SSH to become available on a domain with a timeout
-fn wait_for_ssh_available(
-    domain_name: &str,
-    timeout_secs: u64,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let start_time = std::time::Instant::now();
-    let timeout_duration = std::time::Duration::from_secs(timeout_secs);
-
-    println!(
-        "Waiting for SSH to become available on domain: {}",
-        domain_name
-    );
-
-    loop {
-        // Check if we've exceeded the timeout before attempting SSH
-        if start_time.elapsed() >= timeout_duration {
-            return Err(format!("Timeout waiting for SSH after {} seconds", timeout_secs).into());
-        }
-
-        // Try a simple SSH command to test connectivity with a short timeout (5 seconds)
-        // This prevents each SSH attempt from hanging for the default 30 seconds
-        let ssh_test = run_bcvk(&[
-            "libvirt",
-            "ssh",
-            "--timeout",
-            "5",
-            domain_name,
-            "--",
-            "echo",
-            "ssh-ready",
-        ]);
-
-        match ssh_test {
-            Ok(output) if output.success() => {
-                println!("✓ SSH is now available");
-                return Ok(());
-            }
-            Ok(_) => {
-                // SSH command failed, but that's expected while VM is booting
-            }
-            Err(e) => {
-                println!("SSH test error (expected while booting): {}", e);
-            }
-        }
-
-        // Wait 2 seconds before next attempt (since we already waited 5 seconds for SSH timeout)
-        std::thread::sleep(std::time::Duration::from_secs(2));
     }
 }
 

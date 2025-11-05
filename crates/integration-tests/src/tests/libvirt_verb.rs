@@ -486,46 +486,6 @@ fn check_libvirt_supports_readonly_virtiofs() -> Result<bool> {
     Ok(supports_readonly)
 }
 
-/// Wait for SSH to become available on a domain with a timeout
-fn wait_for_ssh_available(
-    domain_name: &str,
-    timeout_secs: u64,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let start_time = std::time::Instant::now();
-    let timeout_duration = std::time::Duration::from_secs(timeout_secs);
-
-    println!(
-        "Waiting for SSH to become available on domain: {}",
-        domain_name
-    );
-
-    loop {
-        // Try a simple SSH command to test connectivity
-        let ssh_test = run_bcvk(&["libvirt", "ssh", domain_name, "--", "echo", "ssh-ready"]);
-
-        match ssh_test {
-            Ok(output) if output.success() => {
-                println!("✓ SSH is now available");
-                return Ok(());
-            }
-            Ok(_) => {
-                // SSH command failed, but that's expected while VM is booting
-            }
-            Err(e) => {
-                println!("SSH test error (expected while booting): {}", e);
-            }
-        }
-
-        // Check if we've exceeded the timeout
-        if start_time.elapsed() >= timeout_duration {
-            return Err(format!("Timeout waiting for SSH after {} seconds", timeout_secs).into());
-        }
-
-        // Wait 5 seconds before next attempt
-        std::thread::sleep(std::time::Duration::from_secs(5));
-    }
-}
-
 /// Test VM startup and shutdown with libvirt run
 fn test_libvirt_run_vm_lifecycle() -> Result<()> {
     let bck = get_bck_command()?;
@@ -664,6 +624,7 @@ fn test_libvirt_run_bind_storage_ro() -> Result<()> {
         "--bind-storage-ro",
         "--filesystem",
         "ext4",
+        "--ssh-wait",
         &test_image,
     ])
     .expect("Failed to run libvirt run with --bind-storage-ro");
@@ -730,13 +691,10 @@ fn test_libvirt_run_bind_storage_ro() -> Result<()> {
     println!("✓ Container storage mount is configured as read-only");
     println!("✓ hoststorage tag is present in filesystem configuration");
 
-    // Wait for VM to boot and SSH to become available
-    if let Err(e) = wait_for_ssh_available(&domain_name, 180) {
-        cleanup_domain(&domain_name);
-        panic!("Failed to establish SSH connection: {}", e);
-    }
+    // SSH is already available due to --ssh-wait flag
+    println!("✓ SSH is ready (via --ssh-wait)");
 
-    // Wait for VM to boot and automatic mount to complete
+    // Wait for automatic mount to complete
     println!("Waiting for VM to boot and automatic mount to complete...");
     std::thread::sleep(std::time::Duration::from_secs(10));
 

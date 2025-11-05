@@ -1,10 +1,79 @@
 use camino::{Utf8Path, Utf8PathBuf};
-use std::io::{Seek as _, Write as _};
-use std::os::fd::OwnedFd;
-
-use cap_std_ext::cap_std::io_lifetimes::AsFilelike as _;
 use color_eyre::eyre::{eyre, Context};
 use color_eyre::Result;
+use indicatif::ProgressBar;
+use std::io::{Seek as _, Write as _};
+use std::os::fd::OwnedFd;
+use std::time::{Duration, Instant};
+
+use cap_std_ext::cap_std::io_lifetimes::AsFilelike as _;
+use tracing::debug;
+
+/// Wait for a condition to become ready with progress indication
+///
+/// Generic polling function that repeatedly tests a condition until it succeeds or
+/// times out. Updates a progress bar with attempt count and elapsed time.
+///
+/// # Arguments
+///
+/// * `progress` - Progress bar to update with attempt status
+/// * `message` - Message to display (e.g., "Waiting for SSH")
+/// * `test_fn` - Function that tests the readiness condition, returns Ok(true) on success
+/// * `timeout` - Maximum duration to wait
+/// * `poll_interval` - Duration to wait between test attempts
+///
+/// # Returns
+///
+/// Returns the elapsed duration and progress bar on success, or an error on timeout
+pub fn wait_for_readiness<F>(
+    progress: ProgressBar,
+    message: &str,
+    mut test_fn: F,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> Result<(Duration, ProgressBar)>
+where
+    F: FnMut() -> Result<bool>,
+{
+    let start_time = Instant::now();
+
+    debug!("Polling for readiness (timeout: {}s)", timeout.as_secs());
+
+    let mut attempt = 0;
+    while start_time.elapsed() < timeout {
+        attempt += 1;
+
+        progress.set_message(format!(
+            "{} (attempt {}, elapsed: {}s)",
+            message,
+            attempt,
+            start_time.elapsed().as_secs()
+        ));
+
+        // Try to connect
+        match test_fn() {
+            Ok(true) => {
+                debug!("Readiness check successful after {} attempts", attempt);
+                return Ok((start_time.elapsed(), progress));
+            }
+            Ok(false) => {
+                debug!("Readiness check attempt {} returned false", attempt);
+            }
+            Err(e) => {
+                debug!("Readiness check attempt {} failed: {}", attempt, e);
+            }
+        }
+
+        // Wait before next attempt
+        std::thread::sleep(poll_interval);
+    }
+
+    Err(eyre!(
+        "Timeout waiting for readiness after {}s ({} attempts)",
+        timeout.as_secs(),
+        attempt
+    ))
+}
 
 /// Creates a sealed memory file descriptor for secure data transfer.
 /// The sealed memfd cannot be modified after creation, providing tamper protection.

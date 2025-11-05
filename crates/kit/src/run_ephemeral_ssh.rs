@@ -3,8 +3,7 @@ use color_eyre::Result;
 use indicatif::ProgressBar;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tracing::debug;
 
 use crate::run_ephemeral::{run_detached, RunEphemeralOpts};
@@ -116,38 +115,32 @@ pub fn wait_for_ssh_ready(
     let timeout = timeout.unwrap_or(SSH_TIMEOUT);
     let (_, progress) = wait_for_vm_ssh(container_name, Some(timeout), progress)?;
 
-    debug!("Polling SSH connectivity...",);
-    let start_time = Instant::now();
+    debug!("Polling SSH connectivity...");
 
     // Use SSH options optimized for connectivity testing
     let ssh_options = crate::ssh::SshConnectionOptions::for_connectivity_test();
+    let container_name = container_name.to_string();
 
-    let mut attempt = 0;
-    while start_time.elapsed() < timeout {
-        attempt += 1;
-        progress.set_message(format!("Polling for SSH readiness (attempt {attempt})"));
+    // Use shared polling function with container-specific test
+    crate::utils::wait_for_readiness(
+        progress,
+        "Waiting for SSH",
+        || {
+            // Try to connect via SSH and run a simple command
+            let status = crate::ssh::connect(
+                &container_name,
+                vec!["true".to_string()], // Just run 'true' to test connectivity
+                &ssh_options,
+            );
 
-        // Try to connect via SSH and run a simple command using the centralized SSH function
-        let status = crate::ssh::connect(
-            container_name,
-            vec!["true".to_string()], // Just run 'true' to test connectivity
-            &ssh_options,
-        );
-
-        if let Ok(exit_status) = status {
-            if exit_status.success() {
-                debug!("SSH connection successful, VM is ready");
-                return Ok((start_time.elapsed(), progress));
+            match status {
+                Ok(exit_status) if exit_status.success() => Ok(true),
+                _ => Ok(false),
             }
-        }
-
-        thread::sleep(Duration::from_secs(1));
-    }
-
-    Err(color_eyre::eyre::eyre!(
-        "Timeout waiting for SSH connectivity after {}s",
-        timeout.as_secs()
-    ))
+        },
+        timeout,
+        Duration::from_secs(1), // Poll every 1 second
+    )
 }
 
 /// Run an ephemeral pod and immediately SSH into it, with lifecycle binding

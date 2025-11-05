@@ -95,6 +95,10 @@ Run a bootable container as a persistent VM
 
     Automatically SSH into the VM after creation
 
+**--ssh-wait**
+
+    Wait for SSH to become available and verify connectivity (for testing)
+
 **--bind-storage-ro**
 
     Mount host container storage (RO) at /run/host-container-storage

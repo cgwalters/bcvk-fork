@@ -45,6 +45,7 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtStartOpts)
                 timeout: 30,
                 log_level: "ERROR".to_string(),
                 extra_options: vec![],
+                suppress_output: false,
             };
             return crate::libvirt::ssh::run(global_opts, ssh_opts);
         }
@@ -81,6 +82,7 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtStartOpts)
             timeout: 30,
             log_level: "ERROR".to_string(),
             extra_options: vec![],
+            suppress_output: false,
         };
         crate::libvirt::ssh::run(global_opts, ssh_opts)
     } else {
