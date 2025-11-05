@@ -19,6 +19,9 @@ use crate::libvirt::domain::VirtiofsFilesystem;
 use crate::utils::parse_memory_to_mb;
 use crate::xml_utils;
 
+/// SSH wait timeout in seconds
+const SSH_WAIT_TIMEOUT_SECONDS: u64 = 180;
+
 /// Create a virsh command with optional connection URI
 pub(super) fn virsh_command(connect_uri: Option<&str>) -> Result<std::process::Command> {
     let mut cmd = std::process::Command::new("virsh");
@@ -253,6 +256,10 @@ pub struct LibvirtRunOpts {
     #[clap(long)]
     pub ssh: bool,
 
+    /// Wait for SSH to become available and verify connectivity (for testing)
+    #[clap(long, conflicts_with = "ssh")]
+    pub ssh_wait: bool,
+
     /// Mount host container storage (RO) at /run/host-container-storage
     #[clap(long = "bind-storage-ro")]
     pub bind_storage_ro: bool,
@@ -317,6 +324,60 @@ impl LibvirtRunOpts {
             Ok(self.cpus)
         }
     }
+}
+
+/// Wait for SSH to become available on a libvirt domain
+///
+/// Polls SSH connectivity by attempting simple commands until successful or timeout.
+fn wait_for_ssh_ready(
+    global_opts: &crate::libvirt::LibvirtOptions,
+    domain_name: &str,
+    timeout_secs: u64,
+) -> Result<()> {
+    use std::time::Duration;
+
+    debug!(
+        "Waiting for SSH to become available on domain '{}' (timeout: {}s)",
+        domain_name, timeout_secs
+    );
+
+    // Create progress bar
+    let pb = crate::boot_progress::create_boot_progress_bar();
+    pb.set_message("Waiting for SSH to become available...");
+
+    // Clone values for closure
+    let global_opts_clone = global_opts.clone();
+    let domain_name_clone = domain_name.to_string();
+
+    // Use shared polling function with libvirt-specific test
+    let (_elapsed, pb) = crate::utils::wait_for_readiness(
+        pb,
+        "Waiting for SSH",
+        || {
+            // Create a test SSH connection with short timeout
+            let ssh_opts = crate::libvirt::ssh::LibvirtSshOpts {
+                domain_name: domain_name_clone.clone(),
+                user: "root".to_string(),
+                command: vec!["true".to_string()], // Simple command to test connectivity
+                strict_host_keys: false,
+                timeout: 5, // Short timeout for each attempt
+                log_level: "ERROR".to_string(),
+                extra_options: vec![],
+                suppress_output: true, // Suppress error messages during connectivity testing
+            };
+
+            // Try to connect
+            match crate::libvirt::ssh::run_ssh_impl(&global_opts_clone, ssh_opts) {
+                Ok(_) => Ok(true),
+                Err(_) => Ok(false),
+            }
+        },
+        Duration::from_secs(timeout_secs),
+        Duration::from_secs(2), // Poll every 2 seconds
+    )?;
+
+    pb.finish_and_clear();
+    Ok(())
 }
 
 /// Execute the libvirt run command
@@ -445,12 +506,21 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
         }
     }
 
-    if opts.ssh {
+    if opts.ssh_wait {
+        // Wait for SSH to be ready and verify connectivity
+        wait_for_ssh_ready(global_opts, &vm_name, SSH_WAIT_TIMEOUT_SECONDS)?;
+        println!("Ready; use bcvk libvirt ssh to connect");
+        Ok(())
+    } else if opts.ssh {
+        // Wait for SSH then enter interactive shell
+        wait_for_ssh_ready(global_opts, &vm_name, SSH_WAIT_TIMEOUT_SECONDS)?;
+
         // Use the libvirt SSH functionality directly
         let ssh_opts = crate::libvirt::ssh::LibvirtSshOpts {
             domain_name: vm_name,
             user: "root".to_string(),
             command: vec![],
+            suppress_output: false,
             strict_host_keys: false,
             timeout: 30,
             log_level: "ERROR".to_string(),

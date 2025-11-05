@@ -46,6 +46,10 @@ pub struct LibvirtSshOpts {
     /// Extra SSH options in key=value format
     #[clap(long)]
     pub extra_options: Vec<String>,
+
+    /// Suppress stdout/stderr output (for connectivity testing)
+    #[clap(skip)]
+    pub suppress_output: bool,
 }
 
 /// SSH configuration extracted from domain metadata
@@ -316,13 +320,17 @@ impl LibvirtSshOpts {
                 .map_err(|e| eyre!("Failed to execute SSH command: {}", e))?;
 
             if !output.stdout.is_empty() {
-                // Forward stdout to parent process
-                print!("{}", String::from_utf8_lossy(&output.stdout));
+                if !self.suppress_output {
+                    // Forward stdout to parent process
+                    print!("{}", String::from_utf8_lossy(&output.stdout));
+                }
                 debug!("SSH stdout: {}", String::from_utf8_lossy(&output.stdout));
             }
             if !output.stderr.is_empty() {
-                // Forward stderr to parent process
-                eprint!("{}", String::from_utf8_lossy(&output.stderr));
+                if !self.suppress_output {
+                    // Forward stderr to parent process
+                    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+                }
                 debug!("SSH stderr: {}", String::from_utf8_lossy(&output.stderr));
             }
 
