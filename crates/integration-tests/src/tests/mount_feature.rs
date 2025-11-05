@@ -17,7 +17,6 @@
 use camino::Utf8Path;
 use color_eyre::Result;
 use integration_tests::integration_test;
-use linkme::distributed_slice;
 
 use std::fs;
 use tempfile::TempDir;

@@ -8,7 +8,6 @@
 
 use color_eyre::Result;
 use integration_tests::integration_test;
-use linkme::distributed_slice;
 
 use regex::Regex;
 use std::process::Command;

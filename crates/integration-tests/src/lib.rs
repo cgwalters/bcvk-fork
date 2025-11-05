@@ -6,8 +6,6 @@
 // Unfortunately needed here to work with linkme
 #![allow(unsafe_code)]
 
-use linkme::distributed_slice;
-
 /// Label used to identify containers created by integration tests
 pub const INTEGRATION_TEST_LABEL: &str = "bcvk.integration-test=1";
 
@@ -53,11 +51,11 @@ impl ParameterizedIntegrationTest {
 }
 
 /// Distributed slice holding all registered integration tests
-#[distributed_slice]
+#[linkme::distributed_slice]
 pub static INTEGRATION_TESTS: [IntegrationTest];
 
 /// Distributed slice holding all registered parameterized integration tests
-#[distributed_slice]
+#[linkme::distributed_slice]
 pub static PARAMETERIZED_INTEGRATION_TESTS: [ParameterizedIntegrationTest];
 
 /// Register an integration test with less boilerplate.
@@ -78,7 +76,7 @@ pub static PARAMETERIZED_INTEGRATION_TESTS: [ParameterizedIntegrationTest];
 macro_rules! integration_test {
     ($fn_name:ident) => {
         ::paste::paste! {
-            #[distributed_slice($crate::INTEGRATION_TESTS)]
+            #[::linkme::distributed_slice($crate::INTEGRATION_TESTS)]
             static [<$fn_name:upper>]: $crate::IntegrationTest =
                 $crate::IntegrationTest::new(stringify!($fn_name), $fn_name);
         }
@@ -103,7 +101,7 @@ macro_rules! integration_test {
 macro_rules! parameterized_integration_test {
     ($fn_name:ident) => {
         ::paste::paste! {
-            #[distributed_slice($crate::PARAMETERIZED_INTEGRATION_TESTS)]
+            #[::linkme::distributed_slice($crate::PARAMETERIZED_INTEGRATION_TESTS)]
             static [<$fn_name:upper>]: $crate::ParameterizedIntegrationTest =
                 $crate::ParameterizedIntegrationTest::new(stringify!($fn_name), $fn_name);
         }
