@@ -249,9 +249,10 @@ impl ToDiskOpts {
 
             # Execute bootc installation, having the outer podman pull from
             # the virtiofs store on the host, as well as the inner bootc.
+            # Mount /var/tmp into inner container to avoid cross-device link errors (issue #125)
             export STORAGE_OPTS=additionalimagestore=${AIS}
             podman run --rm -i ${tty} --privileged --pid=host --net=none -v /sys:/sys:ro \
-                 -v /var/lib/containers:/var/lib/containers -v /dev:/dev -v ${AIS}:${AIS} --security-opt label=type:unconfined_t \
+                 -v /var/lib/containers:/var/lib/containers -v /var/tmp:/var/tmp -v /dev:/dev -v ${AIS}:${AIS} --security-opt label=type:unconfined_t \
                 --env=STORAGE_OPTS \
                 {INSTALL_LOG} \
                 {SOURCE_IMGREF} \

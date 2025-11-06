@@ -16,12 +16,76 @@
 
 use camino::Utf8PathBuf;
 use color_eyre::Result;
-use integration_tests::integration_test;
+use integration_tests::{integration_test, parameterized_integration_test};
 
 use std::process::Command;
 use tempfile::TempDir;
 
-use crate::{get_test_image, run_bcvk, INTEGRATION_TEST_LABEL};
+use crate::{get_test_image, run_bcvk, CapturedOutput, INTEGRATION_TEST_LABEL};
+
+/// Validate that a disk image was created successfully with proper bootc installation
+///
+/// This helper function verifies:
+/// - The disk image file exists and has non-zero size
+/// - The disk has valid partition table (using sfdisk, only for raw images)
+/// - The installation completed successfully (from output messages)
+///
+/// Note: sfdisk can only read partition tables from raw disk images, not qcow2.
+/// For qcow2 images, partition validation is skipped.
+fn validate_disk_image(
+    disk_path: &Utf8PathBuf,
+    output: &CapturedOutput,
+    context: &str,
+) -> Result<()> {
+    let metadata = std::fs::metadata(disk_path).expect("Failed to get disk metadata");
+    assert!(metadata.len() > 0, "{}: Disk image is empty", context);
+
+    // Only verify partitions for raw images - sfdisk can't read qcow2 format
+    let is_qcow2 = disk_path.as_str().ends_with(".qcow2");
+    if !is_qcow2 {
+        // Verify the disk has partitions using sfdisk -l
+        let sfdisk_output = Command::new("sfdisk")
+            .arg("-l")
+            .arg(disk_path.as_str())
+            .output()
+            .expect("Failed to run sfdisk");
+
+        let sfdisk_stdout = String::from_utf8_lossy(&sfdisk_output.stdout);
+
+        assert!(
+            sfdisk_output.status.success(),
+            "{}: sfdisk failed with exit code: {:?}",
+            context,
+            sfdisk_output.status.code()
+        );
+
+        assert!(
+            sfdisk_stdout.contains("Disk ")
+                && (sfdisk_stdout.contains("sectors") || sfdisk_stdout.contains("bytes")),
+            "{}: sfdisk output doesn't show expected disk information",
+            context
+        );
+
+        let has_partitions = sfdisk_stdout.lines().any(|line| {
+            line.contains(disk_path.as_str()) && (line.contains("Linux") || line.contains("EFI"))
+        });
+
+        assert!(
+            has_partitions,
+            "{}: No bootc partitions found in sfdisk output. Output was:\n{}",
+            context, sfdisk_stdout
+        );
+    }
+
+    assert!(
+        output.stdout.contains("Installation complete") || output.stderr.contains("Installation complete"),
+        "{}: No 'Installation complete' message found in output. This indicates bootc install did not complete successfully. stdout: {}, stderr: {}",
+        context,
+        output.stdout, output.stderr
+    );
+
+    Ok(())
+}
 
 /// Test actual bootc installation to a disk image
 fn test_to_disk() -> Result<()> {
@@ -45,45 +109,7 @@ fn test_to_disk() -> Result<()> {
         output.stderr
     );
 
-    let metadata = std::fs::metadata(&disk_path).expect("Failed to get disk metadata");
-    assert!(metadata.len() > 0);
-
-    // Verify the disk has partitions using sfdisk -l
-    let sfdisk_output = Command::new("sfdisk")
-        .arg("-l")
-        .arg(disk_path.as_str())
-        .output()
-        .expect("Failed to run sfdisk");
-
-    let sfdisk_stdout = String::from_utf8_lossy(&sfdisk_output.stdout);
-
-    assert!(
-        sfdisk_output.status.success(),
-        "sfdisk failed with exit code: {:?}",
-        sfdisk_output.status.code()
-    );
-
-    assert!(
-        sfdisk_stdout.contains("Disk ")
-            && (sfdisk_stdout.contains("sectors") || sfdisk_stdout.contains("bytes")),
-        "sfdisk output doesn't show expected disk information"
-    );
-
-    let has_partitions = sfdisk_stdout.lines().any(|line| {
-        line.contains(disk_path.as_str()) && (line.contains("Linux") || line.contains("EFI"))
-    });
-
-    assert!(
-        has_partitions,
-        "No bootc partitions found in sfdisk output. Output was:\n{}",
-        sfdisk_stdout
-    );
-
-    assert!(
-        output.stdout.contains("Installation complete") || output.stderr.contains("Installation complete"),
-        "No 'Installation complete' message found in output. This indicates bootc install did not complete successfully. stdout: {}, stderr: {}",
-        output.stdout, output.stderr
-    );
+    validate_disk_image(&disk_path, &output, "test_to_disk")?;
     Ok(())
 }
 integration_test!(test_to_disk);
@@ -111,9 +137,6 @@ fn test_to_disk_qcow2() -> Result<()> {
         output.stderr
     );
 
-    let metadata = std::fs::metadata(&disk_path).expect("Failed to get disk metadata");
-    assert!(metadata.len() > 0);
-
     // Verify the file is actually qcow2 format using qemu-img info
     let qemu_img_output = Command::new("qemu-img")
         .args(["info", disk_path.as_str()])
@@ -134,11 +157,7 @@ fn test_to_disk_qcow2() -> Result<()> {
         qemu_img_stdout
     );
 
-    assert!(
-        output.stdout.contains("Installation complete") || output.stderr.contains("Installation complete"),
-        "No 'Installation complete' message found in output. This indicates bootc install did not complete successfully. stdout: {}, stderr: {}",
-        output.stdout, output.stderr
-    );
+    validate_disk_image(&disk_path, &output, "test_to_disk_qcow2")?;
     Ok(())
 }
 integration_test!(test_to_disk_qcow2);
@@ -300,3 +319,40 @@ fn test_to_disk_different_imgref_same_digest() -> Result<()> {
     Ok(())
 }
 integration_test!(test_to_disk_different_imgref_same_digest);
+
+/// Test to-disk with various bootc images to ensure compatibility
+///
+/// This parameterized test runs to-disk with multiple container images,
+/// particularly testing AlmaLinux which had cross-device link issues (issue #125)
+fn test_to_disk_for_image(image: &str) -> Result<()> {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let disk_path = Utf8PathBuf::try_from(temp_dir.path().join("test-disk.img"))
+        .expect("temp path is not UTF-8");
+
+    let output = run_bcvk(&[
+        "to-disk",
+        "--label",
+        INTEGRATION_TEST_LABEL,
+        // Not all iamges have one
+        "--filesystem=ext4",
+        image,
+        disk_path.as_str(),
+    ])?;
+
+    assert!(
+        output.success(),
+        "to-disk with image {} failed with exit code: {:?}. stdout: {}, stderr: {}",
+        image,
+        output.exit_code(),
+        output.stdout,
+        output.stderr
+    );
+
+    validate_disk_image(
+        &disk_path,
+        &output,
+        &format!("test_to_disk_multi_image({})", image),
+    )?;
+    Ok(())
+}
+parameterized_integration_test!(test_to_disk_for_image);
