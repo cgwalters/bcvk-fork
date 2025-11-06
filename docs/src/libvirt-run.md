@@ -13,7 +13,6 @@ bcvk libvirt run \
   --name production-api \
   --memory 8192 \
   --cpus 4 \
-  --autostart \
   quay.io/myapp/api:v1.0
 
 # Development setup with SSH
