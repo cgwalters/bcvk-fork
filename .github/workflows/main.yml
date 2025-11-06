@@ -15,7 +15,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest-8cores
 
     steps:
       - uses: actions/checkout@v4
@@ -82,7 +82,7 @@ jobs:
           retention-days: 7
 
   integration-tests:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest-8cores
     needs: build
     strategy:
       fail-fast: false
