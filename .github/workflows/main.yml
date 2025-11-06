@@ -18,19 +18,14 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y just pkg-config go-md2man libvirt-daemon libvirt-clients qemu-kvm qemu-system qemu-utils virtiofsd
-
-      - name: Install podman for heredoc support
-        run: |
-          set -eux
-          echo 'deb [trusted=yes] https://ftp.debian.org/debian/ testing main' | sudo tee /etc/apt/sources.list.d/testing.list
-          sudo apt update
-          sudo apt install -y crun/testing podman/testing just
-
       - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/bootc-ubuntu-setup
+        with:
+          libvirt: 'true'
+
+      - name: Install additional dependencies
+        run: sudo apt install -y go-md2man
 
       - name: Extract image lists from Justfile
         run: |
@@ -41,9 +36,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - uses: taiki-e/install-action@nextest
-
-      - name: Cache build artifacts
-        uses: Swatinem/rust-cache@v2
 
       - name: Build
         run: just validate && just build
@@ -98,26 +90,11 @@ jobs:
         partition: [1, 2, 3, 4]
 
     steps:
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y just pkg-config go-md2man libvirt-daemon libvirt-clients qemu-kvm qemu-system qemu-utils virtiofsd
-
-      - name: Install podman for heredoc support
-        run: |
-          set -eux
-          echo 'deb [trusted=yes] https://ftp.debian.org/debian/ testing main' | sudo tee /etc/apt/sources.list.d/testing.list
-          sudo apt update
-          sudo apt install -y crun/testing podman/testing just
-
-      - name: Enable KVM group perms
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-          ls -l /dev/kvm
-
       - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/bootc-ubuntu-setup
+        with:
+          libvirt: 'true'
 
       - name: Extract image lists from Justfile
         run: |
