@@ -1,5 +1,5 @@
 PRIMARY_IMAGE := "quay.io/centos-bootc/centos-bootc:stream10"
-ALL_BASE_IMAGES := "quay.io/fedora/fedora-bootc:42 quay.io/centos-bootc/centos-bootc:stream9 quay.io/centos-bootc/centos-bootc:stream10"
+ALL_BASE_IMAGES := "quay.io/fedora/fedora-bootc:42 quay.io/centos-bootc/centos-bootc:stream9 quay.io/centos-bootc/centos-bootc:stream10 quay.io/almalinuxorg/almalinux-bootc:9.6"
 
 # Build the native binary
 build:
