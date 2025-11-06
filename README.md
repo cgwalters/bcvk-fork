@@ -28,7 +28,8 @@ bcvk ephemeral run-ssh quay.io/fedora/fedora-bootc:42
 ```
 
 Everything with `bcvk ephemeral` creates a podman container that reuses the
-host virtualization stack, and
+host virtualization stack, making it simple to test bootc containers without
+requiring root privileges or dedicated VM infrastructure.
 
 ### Creating a persistent bootable disk image from a container image
 ```bash
@@ -89,9 +90,6 @@ bcvk libvirt rm my-fedora-vm
 # Upload a pre-built disk image to libvirt storage
 bcvk to-disk quay.io/fedora/fedora-bootc:42 /tmp/fedora.img
 bcvk libvirt upload /tmp/fedora.img --name fedora-base
-
-# Create a domain from uploaded image
-bcvk libvirt create fedora-base --name my-vm --memory 8192
 
 # Run with custom filesystem and network settings
 bcvk libvirt run --filesystem xfs --network bridge quay.io/centos-bootc/centos-bootc:stream10

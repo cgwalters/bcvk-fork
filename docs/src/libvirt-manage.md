@@ -9,7 +9,6 @@ bcvk libvirt run --name myvm quay.io/fedora/fedora-bootc:42
 # Manage state
 bcvk libvirt start myvm
 bcvk libvirt stop myvm
-bcvk libvirt restart myvm
 
 # Remove VM
 bcvk libvirt rm myvm

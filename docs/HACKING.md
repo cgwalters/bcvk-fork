@@ -34,9 +34,9 @@ Integration tests require QEMU/KVM to be fully working as they launch actual VMs
 
 ## Running
 
-Ensure the entrypoint script is in `$PATH`, i.e. that `bck` works.
+Ensure the entrypoint script is in `$PATH`, i.e. that `bcvk` works.
 
-Then you can invoke `bck`.
+Then you can invoke `bcvk`.
 
 ## Code formatting
 

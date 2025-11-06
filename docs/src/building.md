@@ -35,7 +35,7 @@ sudo systemctl enable --now libvirtd
 ## Clone and Build
 
 ```bash
-git clone https://github.com/cgwalters/bcvk.git
+git clone https://github.com/bootc-dev/bcvk.git
 cd bcvk
 cargo build --release
 ```

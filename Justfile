@@ -94,5 +94,5 @@ archive: build
 
 # Install the binary to ~/.local/bin
 install: build
-    cp target/release/bck ~/.local/bin/
+    cp target/release/bcvk ~/.local/bin/
 
