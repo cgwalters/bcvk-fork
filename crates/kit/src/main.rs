@@ -42,6 +42,7 @@ pub const CONTAINER_STATEDIR: &str = "/var/lib/bcvk";
 /// install them to disk, or manage existing installations - all without
 /// requiring root privileges.
 #[derive(Parser)]
+#[command(version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
