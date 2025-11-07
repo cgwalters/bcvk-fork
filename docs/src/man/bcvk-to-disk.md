@@ -47,6 +47,10 @@ The installation process:
 
     Path to host container storage (auto-detected if not specified)
 
+**--target-transport**=*TARGET_TRANSPORT*
+
+    The transport; e.g. oci, oci-archive, containers-storage.  Defaults to `registry`
+
 **--karg**=*KARG*
 
     Set a kernel argument

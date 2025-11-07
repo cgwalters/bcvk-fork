@@ -34,10 +34,16 @@ struct CacheInputs {
     /// This is crucial because it determines the upgrade source for the installed system
     source_imgref: String,
 
+    /// Target transport
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_transport: Option<String>,
+
     /// Filesystem type used for installation (e.g., "ext4", "xfs", "btrfs")
+    #[serde(skip_serializing_if = "Option::is_none")]
     filesystem: Option<String>,
 
     /// Root filesystem size if specified
+    #[serde(skip_serializing_if = "Option::is_none")]
     root_size: Option<String>,
 
     /// Whether to use composefs-native storage
@@ -59,6 +65,9 @@ pub struct DiskImageMetadata {
     /// Source image reference (e.g., "quay.io/centos-bootc/centos-bootc:stream9")
     /// This is crucial because it determines the upgrade source for the installed system
     pub source_imgref: String,
+
+    /// Target transport
+    pub target_transport: Option<String>,
 
     /// Filesystem type used for installation (e.g., "ext4", "xfs", "btrfs")
     pub filesystem: Option<String>,
@@ -82,6 +91,7 @@ impl DiskImageMetadata {
         let inputs = CacheInputs {
             image_digest: self.digest.clone(),
             source_imgref: self.source_imgref.clone(),
+            target_transport: self.target_transport.clone(),
             filesystem: self.filesystem.clone(),
             root_size: self.root_size.clone(),
             composefs_backend: self.composefs_backend,
@@ -169,6 +179,7 @@ impl DiskImageMetadata {
             version: 1,
             digest: image_digest.to_owned(),
             source_imgref: source_imgref.to_owned(),
+            target_transport: options.target_transport.clone(),
             filesystem: options.filesystem.clone(),
             root_size: options.root_size.clone(),
             kernel_args: options.karg.clone(),
@@ -326,6 +337,7 @@ mod tests {
         let inputs = CacheInputs {
             image_digest: "sha256:abc123".to_string(),
             source_imgref: "quay.io/test/image:v1".to_string(),
+            target_transport: None,
             filesystem: Some("ext4".to_string()),
             root_size: Some("20G".to_string()),
             kernel_args: vec!["console=ttyS0".to_string()],

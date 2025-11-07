@@ -22,6 +22,9 @@ use crate::xml_utils;
 /// SSH wait timeout in seconds
 const SSH_WAIT_TIMEOUT_SECONDS: u64 = 180;
 
+/// Transport type for updating from host container storage
+const UPDATE_FROM_HOST_TRANSPORT: &str = "containers-storage";
+
 /// Create a virsh command with optional connection URI
 pub(super) fn virsh_command(connect_uri: Option<&str>) -> Result<std::process::Command> {
     let mut cmd = std::process::Command::new("virsh");
@@ -264,6 +267,11 @@ pub struct LibvirtRunOpts {
     #[clap(long = "bind-storage-ro")]
     pub bind_storage_ro: bool,
 
+    /// Implies --bind-storage-ro, but also configure to update from the host
+    /// container storage by default.
+    #[clap(long, conflicts_with = "target_transport")]
+    pub update_from_host: bool,
+
     /// Firmware type for the VM (defaults to uefi-secure)
     #[clap(long, default_value = "uefi-secure")]
     pub firmware: FirmwareType,
@@ -381,7 +389,7 @@ fn wait_for_ssh_ready(
 }
 
 /// Execute the libvirt run command
-pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -> Result<()> {
+pub fn run(global_opts: &crate::libvirt::LibvirtOptions, mut opts: LibvirtRunOpts) -> Result<()> {
     use crate::images;
 
     // Validate labels don't contain commas
@@ -416,6 +424,11 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRunOpts) -
     let inspect = images::inspect(&opts.image)?;
     let image_digest = inspect.digest.to_string();
     debug!("Image digest: {}", image_digest);
+
+    if opts.update_from_host {
+        opts.bind_storage_ro = true;
+        opts.install.target_transport = Some(UPDATE_FROM_HOST_TRANSPORT.to_owned());
+    }
 
     // Phase 1: Find or create a base disk image
     let base_disk_path = crate::libvirt::base_disks::find_or_create_base_disk(
