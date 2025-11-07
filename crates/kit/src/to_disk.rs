@@ -138,6 +138,10 @@ pub struct ToDiskAdditionalOpts {
         help = "Add metadata to the container in key=value form"
     )]
     pub label: Vec<String>,
+
+    /// Check if the disk would be regenerated without actually creating it
+    #[clap(long)]
+    pub dry_run: bool,
 }
 
 /// Configuration options for installing a bootc container image to disk
@@ -302,7 +306,7 @@ impl ToDiskOpts {
 /// for details on the installation workflow and architecture.
 pub fn run(opts: ToDiskOpts) -> Result<()> {
     // Phase 0: Check for existing cached disk image
-    if opts.target_disk.exists() {
+    let would_reuse = if opts.target_disk.exists() {
         debug!(
             "Target disk {} already exists, checking cache metadata",
             opts.target_disk
@@ -316,9 +320,14 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
         match crate::cache_metadata::check_cached_disk(
             opts.target_disk.as_std_path(),
             &image_digest,
+            &opts.source_image,
             &opts.install,
         )? {
             Ok(()) => {
+                if opts.additional.dry_run {
+                    println!("would-reuse");
+                    return Ok(());
+                }
                 println!(
                     "Reusing existing cached disk image (digest {image_digest}) at: {}",
                     opts.target_disk
@@ -327,12 +336,27 @@ pub fn run(opts: ToDiskOpts) -> Result<()> {
             }
             Err(e) => {
                 debug!("Existing disk does not match requirements, recreating: {e}");
-                // Remove the existing disk so we can recreate it
-                std::fs::remove_file(&opts.target_disk).with_context(|| {
-                    format!("Failed to remove existing disk {}", opts.target_disk)
-                })?;
+                if !opts.additional.dry_run {
+                    // Remove the existing disk so we can recreate it
+                    std::fs::remove_file(&opts.target_disk).with_context(|| {
+                        format!("Failed to remove existing disk {}", opts.target_disk)
+                    })?;
+                }
+                false
             }
         }
+    } else {
+        false
+    };
+
+    // In dry-run mode, report whether we would regenerate
+    if opts.additional.dry_run {
+        if would_reuse {
+            println!("would-reuse");
+        } else {
+            println!("would-regenerate");
+        }
+        return Ok(());
     }
 
     // Phase 1: Validation and preparation
@@ -512,7 +536,7 @@ fn write_disk_metadata(
     let digest = inspect.digest.to_string();
 
     // Prepare metadata using the new helper method
-    let metadata = DiskImageMetadata::from(install_options, &digest);
+    let metadata = DiskImageMetadata::from(install_options, &digest, source_image);
 
     // Write metadata using rustix fsetxattr
     let file = std::fs::OpenOptions::new()

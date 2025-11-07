@@ -30,6 +30,10 @@ struct CacheInputs {
     /// SHA256 digest of the source container image
     image_digest: String,
 
+    /// Source image reference (e.g., "quay.io/centos-bootc/centos-bootc:stream9")
+    /// This is crucial because it determines the upgrade source for the installed system
+    source_imgref: String,
+
     /// Filesystem type used for installation (e.g., "ext4", "xfs", "btrfs")
     filesystem: Option<String>,
 
@@ -52,6 +56,10 @@ pub struct DiskImageMetadata {
     /// SHA256 digest of the source container image
     pub digest: String,
 
+    /// Source image reference (e.g., "quay.io/centos-bootc/centos-bootc:stream9")
+    /// This is crucial because it determines the upgrade source for the installed system
+    pub source_imgref: String,
+
     /// Filesystem type used for installation (e.g., "ext4", "xfs", "btrfs")
     pub filesystem: Option<String>,
 
@@ -73,6 +81,7 @@ impl DiskImageMetadata {
     pub fn compute_cache_hash(&self) -> String {
         let inputs = CacheInputs {
             image_digest: self.digest.clone(),
+            source_imgref: self.source_imgref.clone(),
             filesystem: self.filesystem.clone(),
             root_size: self.root_size.clone(),
             composefs_backend: self.composefs_backend,
@@ -152,11 +161,12 @@ impl DiskImageMetadata {
 }
 
 impl DiskImageMetadata {
-    /// Create new metadata from InstallOptions and image digest
-    pub fn from(options: &InstallOptions, image: &str) -> Self {
+    /// Create new metadata from InstallOptions, image digest, and source imgref
+    pub fn from(options: &InstallOptions, image_digest: &str, source_imgref: &str) -> Self {
         Self {
             version: 1,
-            digest: image.to_owned(),
+            digest: image_digest.to_owned(),
+            source_imgref: source_imgref.to_owned(),
             filesystem: options.filesystem.clone(),
             root_size: options.root_size.clone(),
             kernel_args: options.karg.clone(),
@@ -179,6 +189,7 @@ pub(crate) enum ValidationError {
 pub fn check_cached_disk(
     path: &Path,
     image_digest: &str,
+    source_imgref: &str,
     install_options: &InstallOptions,
 ) -> Result<Result<(), ValidationError>> {
     if !path.exists() {
@@ -187,7 +198,7 @@ pub fn check_cached_disk(
     }
 
     // Create metadata for the current request to compute expected hash
-    let expected_meta = DiskImageMetadata::from(install_options, image_digest);
+    let expected_meta = DiskImageMetadata::from(install_options, image_digest, source_imgref);
     let expected_hash = expected_meta.compute_cache_hash();
 
     // Read the cache hash from the disk image
@@ -242,14 +253,16 @@ mod tests {
             root_size: Some("20G".to_string()),
             ..Default::default()
         };
-        let metadata1 = DiskImageMetadata::from(&install_options1, "sha256:abc123");
+        let metadata1 =
+            DiskImageMetadata::from(&install_options1, "sha256:abc123", "quay.io/test/image:v1");
 
         let install_options2 = InstallOptions {
             filesystem: Some("ext4".to_string()),
             root_size: Some("20G".to_string()),
             ..Default::default()
         };
-        let metadata2 = DiskImageMetadata::from(&install_options2, "sha256:abc123");
+        let metadata2 =
+            DiskImageMetadata::from(&install_options2, "sha256:abc123", "quay.io/test/image:v1");
 
         // Same inputs should generate same hash
         assert_eq!(
@@ -257,13 +270,14 @@ mod tests {
             metadata2.compute_cache_hash()
         );
 
-        // Different inputs should generate different hashes
+        // Different digest should generate different hashes
         let install_options3 = InstallOptions {
             filesystem: Some("ext4".to_string()),
             root_size: Some("20G".to_string()),
             ..Default::default()
         };
-        let metadata3 = DiskImageMetadata::from(&install_options3, "sha256:xyz789");
+        let metadata3 =
+            DiskImageMetadata::from(&install_options3, "sha256:xyz789", "quay.io/test/image:v1");
 
         assert_ne!(
             metadata1.compute_cache_hash(),
@@ -276,11 +290,30 @@ mod tests {
             root_size: Some("20G".to_string()),
             ..Default::default()
         };
-        let metadata4 = DiskImageMetadata::from(&install_options4, "sha256:abc123");
+        let metadata4 =
+            DiskImageMetadata::from(&install_options4, "sha256:abc123", "quay.io/test/image:v1");
 
         assert_ne!(
             metadata1.compute_cache_hash(),
             metadata4.compute_cache_hash()
+        );
+
+        // Different source imgref should generate different hash even with same digest
+        let install_options5 = InstallOptions {
+            filesystem: Some("ext4".to_string()),
+            root_size: Some("20G".to_string()),
+            ..Default::default()
+        };
+        let metadata5 = DiskImageMetadata::from(
+            &install_options5,
+            "sha256:abc123",
+            "quay.io/different/image:latest",
+        );
+
+        assert_ne!(
+            metadata1.compute_cache_hash(),
+            metadata5.compute_cache_hash(),
+            "Different source imgrefs with same digest should generate different cache hashes"
         );
     }
 
@@ -288,6 +321,7 @@ mod tests {
     fn test_cache_inputs_serialization() -> Result<()> {
         let inputs = CacheInputs {
             image_digest: "sha256:abc123".to_string(),
+            source_imgref: "quay.io/test/image:v1".to_string(),
             filesystem: Some("ext4".to_string()),
             root_size: Some("20G".to_string()),
             kernel_args: vec!["console=ttyS0".to_string()],
@@ -299,6 +333,7 @@ mod tests {
         let deserialized: CacheInputs = serde_json::from_str(&json)?;
 
         assert_eq!(inputs.image_digest, deserialized.image_digest);
+        assert_eq!(inputs.source_imgref, deserialized.source_imgref);
         assert_eq!(inputs.filesystem, deserialized.filesystem);
         assert_eq!(inputs.root_size, deserialized.root_size);
         assert_eq!(inputs.kernel_args, deserialized.kernel_args);
