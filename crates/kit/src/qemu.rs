@@ -115,6 +115,7 @@ impl Default for ResourceLimits {
 #[derive(Debug)]
 pub enum BootMode {
     /// Direct kernel boot (fast, testing-focused)
+    /// Also used for UKI boot after extracting kernel/initramfs from UKI PE sections
     DirectBoot {
         kernel_path: String,
         initramfs_path: String,
