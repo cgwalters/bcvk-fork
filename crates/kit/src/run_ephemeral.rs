@@ -932,7 +932,8 @@ WantedBy=sysinit.target
             let mut service_content = format!(
                 r#"[Unit]
 Description=Execute Script Service
-Requires=dev-virtio\\x2dports-execute.device
+Requires=dev-virtio\x2dports-execute.device
+After=dev-virtio\x2dports-execute.device
 
 [Service]
 Type=oneshot
@@ -948,7 +949,8 @@ StandardError=inherit
             let service_finish = r#"[Unit]
 Description=Execute Script Service Completion
 After=bootc-execute.service
-Requires=dev-virtio\\x2dports-executestatus.device
+Requires=dev-virtio\x2dports-executestatus.device
+After=dev-virtio\x2dports-executestatus.device
 
 [Service]
 Type=oneshot
