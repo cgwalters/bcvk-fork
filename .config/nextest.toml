@@ -35,8 +35,7 @@ store-success-output = true
 store-failure-output = true
 
 # Per-test overrides for libvirt tests that create VMs
-# These tests race on creating libvirt base disks, so they need to run serially
-# VMs get 4 vcpus by default, so require 4 threads to prevent any parallelism
+# Tests that run `bootc install` can be heavy, so require 4 threads to limit parallelism
 [[profile.integration.overrides]]
-filter = 'test(~^test_libvirt_run)'
+filter = 'test(~^libvirt_run) | test(~^to_disk)'
 threads-required = 4
