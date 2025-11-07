@@ -29,6 +29,10 @@ pub struct InstallOptions {
     )]
     pub storage_path: Option<Utf8PathBuf>,
 
+    /// The transport; e.g. oci, oci-archive, containers-storage.  Defaults to `registry`
+    #[clap(long)]
+    pub target_transport: Option<String>,
+
     #[clap(long)]
     /// Set a kernel argument
     pub karg: Vec<String>,
@@ -55,6 +59,11 @@ impl InstallOptions {
 
         for k in self.karg.iter() {
             args.push(format!("--karg={k}"));
+        }
+
+        if let Some(ref t) = self.target_transport {
+            args.push("--target-transport".to_string());
+            args.push(t.clone());
         }
 
         if self.composefs_backend {

@@ -57,6 +57,10 @@ Run a bootable container as a persistent VM
 
     Path to host container storage (auto-detected if not specified)
 
+**--target-transport**=*TARGET_TRANSPORT*
+
+    The transport; e.g. oci, oci-archive, containers-storage.  Defaults to `registry`
+
 **--karg**=*KARG*
 
     Set a kernel argument
@@ -102,6 +106,10 @@ Run a bootable container as a persistent VM
 **--bind-storage-ro**
 
     Mount host container storage (RO) at /run/host-container-storage
+
+**--update-from-host**
+
+    Implies --bind-storage-ro, but also configure to update from the host container storage by default
 
 **--firmware**=*FIRMWARE*
 
