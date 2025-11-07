@@ -19,7 +19,7 @@ pub fn find_or_create_base_disk(
     install_options: &InstallOptions,
     connect_uri: Option<&str>,
 ) -> Result<Utf8PathBuf> {
-    let metadata = DiskImageMetadata::from(install_options, image_digest);
+    let metadata = DiskImageMetadata::from(install_options, image_digest, source_image);
     let cache_hash = metadata.compute_cache_hash();
 
     // Extract short hash for filename (first 16 chars after "sha256:")
@@ -43,6 +43,7 @@ pub fn find_or_create_base_disk(
         if crate::cache_metadata::check_cached_disk(
             base_disk_path.as_std_path(),
             image_digest,
+            source_image,
             install_options,
         )?
         .is_ok()
@@ -130,6 +131,7 @@ fn create_base_disk(
     let metadata_valid = crate::cache_metadata::check_cached_disk(
         temp_disk_path.as_std_path(),
         image_digest,
+        source_image,
         install_options,
     )
     .context("Querying cached disk")?;

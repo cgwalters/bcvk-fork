@@ -111,6 +111,10 @@ The installation process:
 
     Add metadata to the container in key=value form
 
+**--dry-run**
+
+    Check if the disk would be regenerated without actually creating it
+
 <!-- END GENERATED OPTIONS -->
 
 # ARGUMENTS

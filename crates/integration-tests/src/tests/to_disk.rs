@@ -214,3 +214,89 @@ fn test_to_disk_caching() -> Result<()> {
     Ok(())
 }
 integration_test!(test_to_disk_caching);
+
+/// Test that different image references with the same digest create separate cached disks
+fn test_to_disk_different_imgref_same_digest() -> Result<()> {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+
+    // First, pull the test image
+    let test_image = get_test_image();
+    let output = Command::new("podman")
+        .args(["pull", &test_image])
+        .output()
+        .expect("Failed to run podman pull");
+    assert!(
+        output.status.success(),
+        "Failed to pull test image: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Create a second tag pointing to the same digest
+    let second_tag = format!("{}-alias", test_image);
+    let output = Command::new("podman")
+        .args(["tag", &test_image, &second_tag])
+        .output()
+        .expect("Failed to run podman tag");
+    assert!(
+        output.status.success(),
+        "Failed to tag image: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Create first disk with original image reference
+    let disk_path = Utf8PathBuf::try_from(temp_dir.path().join("test-disk.img"))
+        .expect("temp path is not UTF-8");
+
+    let output1 = run_bcvk(&[
+        "to-disk",
+        "--label",
+        INTEGRATION_TEST_LABEL,
+        &test_image,
+        disk_path.as_str(),
+    ])?;
+
+    assert!(
+        output1.success(),
+        "First to-disk run failed with exit code: {:?}. stdout: {}, stderr: {}",
+        output1.exit_code(),
+        output1.stdout,
+        output1.stderr
+    );
+
+    let metadata1 =
+        std::fs::metadata(&disk_path).expect("Failed to get disk metadata after first run");
+    assert!(metadata1.len() > 0, "Disk image is empty");
+
+    // Use --dry-run with the aliased image reference (same digest, different imgref)
+    // to verify it would regenerate instead of reusing the cache
+    let output2 = run_bcvk(&[
+        "to-disk",
+        "--dry-run",
+        "--label",
+        INTEGRATION_TEST_LABEL,
+        &second_tag,
+        disk_path.as_str(),
+    ])?;
+
+    assert!(
+        output2.success(),
+        "Dry-run with different imgref failed with exit code: {:?}. stdout: {}, stderr: {}",
+        output2.exit_code(),
+        output2.stdout,
+        output2.stderr
+    );
+
+    // The dry-run should report it would regenerate because the source imgref is different
+    assert!(
+        output2.stdout.contains("would-regenerate"),
+        "Dry-run should report 'would-regenerate' for different imgref. stdout: {}, stderr: {}",
+        output2.stdout,
+        output2.stderr
+    );
+
+    // Clean up: remove the aliased tag
+    let _ = Command::new("podman").args(["rmi", &second_tag]).output();
+
+    Ok(())
+}
+integration_test!(test_to_disk_different_imgref_same_digest);
