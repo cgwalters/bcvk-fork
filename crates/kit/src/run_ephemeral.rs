@@ -737,17 +737,36 @@ pub(crate) async fn run_impl(opts: RunEphemeralOpts) -> Result<()> {
     };
     tracing::debug!("Target image has cloud-init: {cloudinit}");
 
-    // Find kernel and initramfs from the container image (not the host)
+    // Verify KVM access
+    if !Utf8Path::new("/dev/kvm").exists() || !fs::File::open("/dev/kvm").is_ok() {
+        return Err(eyre!("KVM device not accessible"));
+    }
+
+    // Create QEMU mount points
+    fs::create_dir_all("/run/qemu")?;
+
+    // Find kernel and initramfs in /usr/lib/modules/
     let modules_dir = Utf8Path::new("/run/source-image/usr/lib/modules");
-    let mut vmlinuz_path = None;
-    let mut initramfs_path = None;
+    let mut uki_file: Option<Utf8PathBuf> = None;
+    let mut vmlinuz_path: Option<Utf8PathBuf> = None;
+    let mut initramfs_path: Option<Utf8PathBuf> = None;
 
     for entry in fs::read_dir(modules_dir)? {
         let entry = entry?;
-        let kernel_dir = entry.path();
-        if kernel_dir.is_dir() {
-            let vmlinuz = kernel_dir.join("vmlinuz");
-            let initramfs = kernel_dir.join("initramfs.img");
+        let path = Utf8PathBuf::from_path_buf(entry.path())
+            .map_err(|p| eyre!("Path is not valid UTF-8: {}", p.display()))?;
+
+        // Check for UKI (.efi file)
+        if path.is_file() && path.extension() == Some("efi") {
+            debug!("Found UKI file: {:?}", path);
+            uki_file = Some(path);
+            break;
+        }
+
+        // Check for traditional kernel in subdirectories
+        if path.is_dir() {
+            let vmlinuz = path.join("vmlinuz");
+            let initramfs = path.join("initramfs.img");
             if vmlinuz.exists() && initramfs.exists() {
                 debug!("Found kernel at: {:?}", vmlinuz);
                 vmlinuz_path = Some(vmlinuz);
@@ -757,50 +776,59 @@ pub(crate) async fn run_impl(opts: RunEphemeralOpts) -> Result<()> {
         }
     }
 
-    let vmlinuz_path = vmlinuz_path
-        .ok_or_else(|| eyre!("No kernel found in /run/source-image/usr/lib/modules"))?;
-    let initramfs_path = initramfs_path
-        .ok_or_else(|| eyre!("No initramfs found in /run/source-image/usr/lib/modules"))?;
-
-    // Verify KVM access
-    if !Utf8Path::new("/dev/kvm").exists() || !fs::File::open("/dev/kvm").is_ok() {
-        return Err(eyre!("KVM device not accessible"));
-    }
-
-    // Create QEMU mount points
-    fs::create_dir_all("/run/qemu")?;
     let kernel_mount = "/run/qemu/kernel";
     let initramfs_mount = "/run/qemu/initramfs";
-    fs::File::create(&kernel_mount)?;
-    fs::File::create(&initramfs_mount)?;
 
-    // Bind mount kernel and initramfs
-    let mut mount_cmd = Command::new("mount");
-    mount_cmd.args([
-        "--bind",
-        "-o",
-        "ro",
-        vmlinuz_path.to_str().unwrap(),
-        &kernel_mount,
-    ]);
-    let status = mount_cmd.status().context("Failed to bind mount kernel")?;
-    if !status.success() {
-        return Err(eyre!("Failed to bind mount kernel"));
-    }
+    // Extract from UKI if found, otherwise use traditional kernel
+    if let Some(uki_path) = uki_file {
+        debug!("Extracting kernel and initramfs from UKI: {:?}", uki_path);
 
-    let mut mount_cmd = Command::new("mount");
-    mount_cmd.args([
-        "--bind",
-        "-o",
-        "ro",
-        initramfs_path.to_str().unwrap(),
-        &initramfs_mount,
-    ]);
-    let status = mount_cmd
-        .status()
-        .context("Failed to bind mount initramfs")?;
-    if !status.success() {
-        return Err(eyre!("Failed to bind mount initramfs"));
+        // Extract .linux section (kernel) from UKI
+        Command::new("objcopy")
+            .args([
+                "--dump-section",
+                &format!(".linux={}", kernel_mount),
+                uki_path.as_str(),
+            ])
+            .run()
+            .map_err(|e| eyre!("Failed to extract kernel from UKI: {e}"))?;
+        debug!("Extracted kernel from UKI to {}", kernel_mount);
+
+        // Extract .initrd section (initramfs) from UKI
+        Command::new("objcopy")
+            .args([
+                "--dump-section",
+                &format!(".initrd={}", initramfs_mount),
+                uki_path.as_str(),
+            ])
+            .run()
+            .map_err(|e| eyre!("Failed to extract initramfs from UKI: {e}"))?;
+        debug!("Extracted initramfs from UKI to {}", initramfs_mount);
+    } else {
+        let vmlinuz_path = vmlinuz_path
+            .ok_or_else(|| eyre!("No kernel found in /run/source-image/usr/lib/modules"))?;
+        let initramfs_path = initramfs_path
+            .ok_or_else(|| eyre!("No initramfs found in /run/source-image/usr/lib/modules"))?;
+
+        fs::File::create(&kernel_mount)?;
+        fs::File::create(&initramfs_mount)?;
+
+        // Bind mount kernel and initramfs
+        Command::new("mount")
+            .args(["--bind", "-o", "ro", vmlinuz_path.as_str(), &kernel_mount])
+            .run()
+            .map_err(|e| eyre!("Failed to bind mount kernel: {e}"))?;
+
+        Command::new("mount")
+            .args([
+                "--bind",
+                "-o",
+                "ro",
+                initramfs_path.as_str(),
+                &initramfs_mount,
+            ])
+            .run()
+            .map_err(|e| eyre!("Failed to bind mount initramfs: {e}"))?;
     }
 
     // Process host mounts and prepare virtiofsd instances for each using async manager
@@ -995,7 +1023,8 @@ StandardOutput=file:/dev/virtio-ports/executestatus
 
     std::fs::create_dir_all(CONTAINER_STATEDIR)?;
 
-    // Configure qemu
+    // Configure qemu for direct kernel boot
+    debug!("Configuring QEMU for direct kernel boot");
     let mut qemu_config = crate::qemu::QemuConfig::new_direct_boot(
         opts.common.memory_mb()?,
         opts.common.vcpus()?,
@@ -1016,7 +1045,8 @@ StandardOutput=file:/dev/virtio-ports/executestatus
         let credential = crate::credentials::smbios_cred_for_root_ssh(&pubkey)?;
         qemu_config.add_smbios_credential(credential);
     }
-    // Build kernel command line
+
+    // Build kernel command line for direct boot
     let mut kernel_cmdline = [
         // At the core we boot from the mounted container's root,
         "rootfstype=virtiofs",
@@ -1046,6 +1076,7 @@ StandardOutput=file:/dev/virtio-ports/executestatus
     }
 
     kernel_cmdline.extend(opts.kernel_args.clone());
+    qemu_config.set_kernel_cmdline(kernel_cmdline);
 
     // TODO allocate unlinked unnamed file and pass via fd
     let mut tmp_swapfile = None;
@@ -1153,9 +1184,7 @@ Options=
         }
     }
 
-    qemu_config
-        .set_kernel_cmdline(kernel_cmdline)
-        .set_console(opts.common.console);
+    qemu_config.set_console(opts.common.console);
 
     // Add virtio-serial device for journal streaming
     qemu_config.add_virtio_serial_out("org.bcvk.journal", "/run/journal.log".to_string(), false);
