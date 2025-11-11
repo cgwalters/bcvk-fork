@@ -700,6 +700,29 @@ fn parse_service_exit_code(status_content: &str) -> Result<i32> {
     Ok(0)
 }
 
+/// Check for required binaries in the target container image
+///
+/// These binaries must be present in the container image being run as an ephemeral VM.
+fn check_required_container_binaries() -> Result<()> {
+    // We use systemctl in a few places. objcopy is for UKI extraction.
+    let required_binaries = ["systemctl", "objcopy"];
+
+    let mut missing = Vec::new();
+
+    for binary in &required_binaries {
+        if which::which(binary).is_err() {
+            missing.push(format!("Missing required executable: {}", binary));
+        }
+    }
+
+    if !missing.is_empty() {
+        return Err(eyre!("{}", missing.join("\n")));
+    }
+
+    debug!("All required container binaries found");
+    Ok(())
+}
+
 /// VM execution inside container: extracts kernel/initramfs, starts virtiofsd processes,
 /// generates systemd mount units, sets up command execution, launches QEMU.
 pub(crate) async fn run_impl(opts: RunEphemeralOpts) -> Result<()> {
@@ -707,6 +730,9 @@ pub(crate) async fn run_impl(opts: RunEphemeralOpts) -> Result<()> {
     use std::fs;
 
     debug!("Running QEMU implementation inside container");
+
+    // Check for required binaries in the target container image early
+    check_required_container_binaries()?;
 
     // Initialize status writer for supervisor monitoring
     let status_writer = StatusWriter::new("/run/supervisor-status.json");

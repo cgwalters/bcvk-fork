@@ -3,6 +3,12 @@ set -euo pipefail
 
 SELFEXE=/run/selfexe
 
+# Check for required binaries early
+if ! command -v bwrap &>/dev/null; then
+    echo "Error: bwrap (bubblewrap) is currently required in the target container image" >&2
+    exit 1
+fi
+
 # Shell script library
 init_tmproot() {
     if test -d /run/tmproot; then return 0; fi
