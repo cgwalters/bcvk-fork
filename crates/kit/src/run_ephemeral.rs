@@ -777,7 +777,10 @@ pub(crate) async fn run_impl(opts: RunEphemeralOpts) -> Result<()> {
     let mut vmlinuz_path: Option<Utf8PathBuf> = None;
     let mut initramfs_path: Option<Utf8PathBuf> = None;
 
-    for entry in fs::read_dir(modules_dir)? {
+    let entries = fs::read_dir(modules_dir)
+        .with_context(|| format!("Failed to read kernel modules directory at {}. This container image may not be a valid bootc image.", modules_dir))?;
+
+    for entry in entries {
         let entry = entry?;
         let path = Utf8PathBuf::from_path_buf(entry.path())
             .map_err(|p| eyre!("Path is not valid UTF-8: {}", p.display()))?;

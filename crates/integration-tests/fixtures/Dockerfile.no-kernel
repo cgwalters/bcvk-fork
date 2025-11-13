@@ -1,0 +1,10 @@
+# Test fixture: Bootc image with kernel removed
+# This simulates a broken/malformed bootc image that will fail during ephemeral VM startup
+# Used to test error handling and cleanup in ephemeral run-ssh command
+
+ARG BASE_IMAGE=quay.io/centos-bootc/centos-bootc:stream10
+
+FROM ${BASE_IMAGE}
+
+# Remove kernel and modules to simulate a broken bootc image
+RUN rm -rf /usr/lib/modules
