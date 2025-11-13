@@ -10,6 +10,117 @@ use crate::run_ephemeral::{run_detached, RunEphemeralOpts};
 use crate::ssh;
 use crate::supervisor_status::{SupervisorState, SupervisorStatus};
 
+/// Container state from podman inspect
+#[derive(Debug, serde::Deserialize)]
+struct ContainerInspect {
+    #[serde(rename = "State")]
+    state: ContainerState,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ContainerState {
+    #[serde(rename = "Status")]
+    status: String,
+    #[serde(rename = "ExitCode")]
+    exit_code: i32,
+    #[serde(rename = "Error")]
+    error: Option<String>,
+}
+
+/// Fetch and display container logs to help diagnose startup failures
+fn show_container_logs(container_name: &str) {
+    debug!("Fetching container logs for {}", container_name);
+
+    // Get container state in a single inspect call
+    let state = Command::new("podman")
+        .args(["inspect", container_name])
+        .output()
+        .ok()
+        .and_then(|output| {
+            serde_json::from_slice::<Vec<ContainerInspect>>(&output.stdout)
+                .ok()
+                .and_then(|mut inspects| inspects.pop())
+                .map(|inspect| inspect.state)
+        });
+
+    if let Some(ref s) = state {
+        eprint!(
+            "\nContainer state: {} (exit code: {})",
+            s.status, s.exit_code
+        );
+        if let Some(ref err) = s.error {
+            if !err.is_empty() {
+                eprint!(" - Error: {}", err);
+            }
+        }
+        eprintln!();
+
+        // Provide helpful hints for common exit codes
+        match s.exit_code {
+            127 => {
+                eprintln!("\nNote: Exit code 127 typically means 'command not found'.");
+                eprintln!("This container image may not be a valid bootc image.");
+                eprintln!("Bootc images must have systemd and kernel modules in /usr/lib/modules.");
+            }
+            126 => {
+                eprintln!("\nNote: Exit code 126 typically means 'permission denied' or file not executable.");
+            }
+            _ => {}
+        }
+    }
+
+    let output = match Command::new("podman")
+        .args(["logs", container_name])
+        .stderr(Stdio::inherit())
+        .output()
+    {
+        Ok(output) => output,
+        Err(e) => {
+            eprintln!("Failed to fetch container logs: {}", e);
+            return;
+        }
+    };
+
+    let logs = String::from_utf8_lossy(&output.stdout);
+    if !logs.trim().is_empty() {
+        eprintln!("\nContainer logs:");
+        eprintln!("----------------------------------------");
+        for line in logs.lines() {
+            eprintln!("{}", line);
+        }
+        eprintln!("----------------------------------------\n");
+    } else {
+        eprintln!("(Container produced no output)");
+    }
+}
+
+/// RAII guard for ephemeral container cleanup
+/// Ensures container is removed when dropped, even on error paths
+struct ContainerCleanup {
+    container_id: String,
+}
+
+impl ContainerCleanup {
+    fn new(container_id: String) -> Self {
+        Self { container_id }
+    }
+}
+
+impl Drop for ContainerCleanup {
+    fn drop(&mut self) {
+        debug!("Cleaning up ephemeral container {}", self.container_id);
+        let result = Command::new("podman")
+            .args(["rm", "-f", &self.container_id])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+
+        if let Err(e) = result {
+            tracing::warn!("Failed to remove container {}: {}", self.container_id, e);
+        }
+    }
+}
+
 /// Timeout waiting for connection
 pub(crate) const SSH_TIMEOUT: std::time::Duration = const { Duration::from_secs(240) };
 
@@ -21,6 +132,17 @@ pub struct RunEphemeralSshOpts {
     /// SSH command to execute (optional, defaults to interactive shell)
     #[arg(trailing_var_arg = true)]
     pub ssh_args: Vec<String>,
+}
+
+/// Check if container is running
+fn is_container_running(container_name: &str) -> Result<bool> {
+    let output = Command::new("podman")
+        .args(["inspect", container_name, "--format", "{{.State.Status}}"])
+        .output()
+        .context("Failed to inspect container state")?;
+
+    let state = String::from_utf8_lossy(&output.stdout);
+    Ok(state.trim() == "running")
 }
 
 /// Wait for VM SSH availability using the supervisor status file
@@ -40,6 +162,13 @@ pub fn wait_for_vm_ssh(
         timeout.as_secs()
     );
 
+    // Check if container is still running before attempting exec
+    if !is_container_running(container_name)? {
+        progress.finish_and_clear();
+        show_container_logs(container_name);
+        return Err(eyre!("Container exited before SSH became available"));
+    }
+
     // Use the new monitor-status subcommand for efficient inotify-based monitoring
     let mut cmd = Command::new("podman");
     cmd.args([
@@ -56,10 +185,14 @@ pub fn wait_for_vm_ssh(
                 .map_err(Into::into)
         });
     }
-    let mut child = cmd
-        .stdout(Stdio::piped())
-        .spawn()
-        .context("Failed to start status monitor")?;
+    let mut child = match cmd.stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            progress.finish_and_clear();
+            show_container_logs(container_name);
+            return Err(e).context("Failed to start status monitor");
+        }
+    };
 
     let stdout = child.stdout.take().unwrap();
     let reader = std::io::BufReader::new(stdout);
@@ -100,6 +233,9 @@ pub fn wait_for_vm_ssh(
     }
 
     let status = child.wait()?;
+
+    progress.finish_and_clear();
+    show_container_logs(container_name);
     Err(eyre!("Monitor process exited unexpectedly: {status:?}"))
 }
 
@@ -147,13 +283,15 @@ pub fn wait_for_ssh_ready(
 pub fn run_ephemeral_ssh(opts: RunEphemeralSshOpts) -> Result<()> {
     // Start the ephemeral pod in detached mode with SSH enabled
     let mut ephemeral_opts = opts.run_opts.clone();
-    ephemeral_opts.podman.rm = true;
     ephemeral_opts.podman.detach = true;
     ephemeral_opts.common.ssh_keygen = true; // Enable SSH key generation and access
 
     debug!("Starting ephemeral VM...");
     let container_id = run_detached(ephemeral_opts)?;
     debug!("Ephemeral VM started with container ID: {}", container_id);
+
+    // Create cleanup guard to ensure container removal on any exit path
+    let _cleanup = ContainerCleanup::new(container_id.clone());
 
     // Use the container ID for SSH and cleanup
     let container_name = container_id;
@@ -176,16 +314,9 @@ pub fn run_ephemeral_ssh(opts: RunEphemeralSshOpts) -> Result<()> {
     let exit_code = status.code().unwrap_or(1);
     debug!("SSH exit code: {}", exit_code);
 
-    // SSH completed, proceed with cleanup
-
-    // Cleanup: stop and remove the container immediately
-    debug!("SSH session ended, cleaning up ephemeral pod...");
-
-    let _ = Command::new("podman")
-        .args(["rm", "-f", &container_name])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    // Explicitly drop the cleanup guard before exit to ensure container removal
+    // (std::process::exit doesn't run drop handlers)
+    drop(_cleanup);
 
     // Exit with SSH client's exit code
     std::process::exit(exit_code);

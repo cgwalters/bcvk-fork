@@ -18,10 +18,70 @@ use color_eyre::Result;
 use integration_tests::{integration_test, parameterized_integration_test};
 
 use std::process::Command;
-use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::{get_test_image, run_bcvk, INTEGRATION_TEST_LABEL};
+
+/// Poll until a container is removed or timeout is reached
+///
+/// Returns Ok(()) if container is removed within timeout, Err otherwise.
+/// Timeout is set to 60 seconds to account for slow CI runners.
+fn wait_for_container_removal(container_name: &str) -> Result<()> {
+    let timeout = Duration::from_secs(60);
+    let start = Instant::now();
+    let poll_interval = Duration::from_millis(100);
+
+    loop {
+        let output = Command::new("podman")
+            .args(["ps", "-a", "--format", "{{.Names}}"])
+            .output()
+            .expect("Failed to list containers");
+
+        let containers = String::from_utf8_lossy(&output.stdout);
+        if !containers.lines().any(|line| line == container_name) {
+            return Ok(());
+        }
+
+        if start.elapsed() >= timeout {
+            return Err(color_eyre::eyre::eyre!(
+                "Timeout waiting for container {} to be removed. Active containers: {}",
+                container_name,
+                containers
+            ));
+        }
+
+        std::thread::sleep(poll_interval);
+    }
+}
+
+/// Build a test fixture image with the kernel removed
+fn build_broken_image() -> Result<String> {
+    let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/Dockerfile.no-kernel");
+    let image_name = format!("localhost/bcvk-test-no-kernel:{}", std::process::id());
+
+    let output = Command::new("podman")
+        .args([
+            "build",
+            "-f",
+            fixture_path,
+            "-t",
+            &image_name,
+            "--build-arg",
+            &format!("BASE_IMAGE={}", get_test_image()),
+            ".",
+        ])
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(color_eyre::eyre::eyre!(
+            "Failed to build broken test image: {}",
+            stderr
+        ));
+    }
+
+    Ok(image_name)
+}
 
 /// Test running a non-interactive command via SSH
 fn test_run_ephemeral_ssh_command() -> Result<()> {
@@ -66,20 +126,9 @@ fn test_run_ephemeral_ssh_cleanup() -> Result<()> {
 
     output.assert_success("ephemeral run-ssh");
 
-    thread::sleep(Duration::from_secs(1));
+    // Poll for container removal with timeout
+    wait_for_container_removal(&container_name)?;
 
-    let check_output = Command::new("podman")
-        .args(["ps", "-a", "--format", "{{.Names}}"])
-        .output()
-        .expect("Failed to list containers");
-
-    let containers = String::from_utf8_lossy(&check_output.stdout);
-    assert!(
-        !containers.contains(&container_name),
-        "Container {} was not cleaned up after SSH exit. Active containers: {}",
-        container_name,
-        containers
-    );
     Ok(())
 }
 integration_test!(test_run_ephemeral_ssh_cleanup);
@@ -248,3 +297,64 @@ echo "All checks passed!"
     Ok(())
 }
 integration_test!(test_run_tmpfs);
+
+/// Test that containers are properly cleaned up even when the image is broken
+///
+/// This test verifies that the drop handler for ContainerCleanup works correctly
+/// when ephemeral run-ssh fails early due to a broken image (missing kernel).
+/// Previously this would fail with "setns `mnt`: Bad file descriptor" when using
+/// podman's --rm flag. Now it should fail cleanly and remove the container.
+fn test_run_ephemeral_ssh_broken_image_cleanup() -> Result<()> {
+    // Build a broken test image (bootc image with kernel removed)
+    eprintln!("Building broken test image...");
+    let broken_image = build_broken_image()?;
+    eprintln!("Built broken image: {}", broken_image);
+
+    let container_name = format!("test-broken-cleanup-{}", std::process::id());
+
+    // Try to run ephemeral SSH with the broken image - this should fail
+    let output = run_bcvk(&[
+        "ephemeral",
+        "run-ssh",
+        "--name",
+        &container_name,
+        "--label",
+        INTEGRATION_TEST_LABEL,
+        &broken_image,
+        "--",
+        "echo",
+        "should not reach here",
+    ])?;
+
+    // The command should fail (no kernel found)
+    assert!(
+        !output.success(),
+        "Expected ephemeral run-ssh to fail with broken image, but it succeeded"
+    );
+
+    // Verify the error message indicates the problem
+    assert!(
+        output
+            .stderr
+            .contains("Failed to read kernel modules directory")
+            || output
+                .stderr
+                .contains("Container exited before SSH became available")
+            || output
+                .stderr
+                .contains("Monitor process exited unexpectedly"),
+        "Expected error about missing kernel or container failure, got: {}",
+        output.stderr
+    );
+
+    // Poll for container removal with timeout
+    wait_for_container_removal(&container_name)?;
+
+    // Clean up the test image
+    let _ = Command::new("podman")
+        .args(["rmi", "-f", &broken_image])
+        .output();
+
+    Ok(())
+}
+integration_test!(test_run_ephemeral_ssh_broken_image_cleanup);
