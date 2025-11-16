@@ -17,6 +17,16 @@ use crate::{
 };
 use bcvk::xml_utils::parse_xml_dom;
 
+/// Generate a random alphanumeric suffix for VM names to avoid collisions
+fn random_suffix() -> String {
+    use rand::{distr::Alphanumeric, Rng};
+    rand::rng()
+        .sample_iter(&Alphanumeric)
+        .take(8)
+        .map(char::from)
+        .collect()
+}
+
 /// Test libvirt list functionality (lists domains)
 fn test_libvirt_list_functionality() -> Result<()> {
     let bck = get_bck_command()?;
@@ -210,13 +220,7 @@ fn test_libvirt_comprehensive_workflow() -> Result<()> {
     let bck = get_bck_command()?;
 
     // Generate unique domain name for this test
-    let domain_name = format!(
-        "test-workflow-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-    );
+    let domain_name = format!("test-workflow-{}", random_suffix());
 
     println!(
         "Testing comprehensive libvirt workflow for domain: {}",
@@ -383,7 +387,128 @@ fn test_libvirt_comprehensive_workflow() -> Result<()> {
     );
     println!("✓ VM is running and accessible");
 
-    // Cleanup domain
+    // Test 6: Test `rm -f` stops running VMs by default
+    println!("Test 6: Testing `rm -f` stops running VMs without --stop flag...");
+    let rm_test_domain = create_test_vm_and_assert("test-rm", &test_image, &domain_name)?;
+
+    // Verify it's running
+    let rm_dominfo_output = Command::new("virsh")
+        .args(&["dominfo", &rm_test_domain])
+        .output()
+        .expect("Failed to run virsh dominfo for rm test VM");
+
+    let rm_info = String::from_utf8_lossy(&rm_dominfo_output.stdout);
+    assert!(
+        rm_info.contains("running") || rm_info.contains("idle"),
+        "Test VM should be running before rm test"
+    );
+    println!("✓ Test VM is running: {}", rm_test_domain);
+
+    // Test rm -f WITHOUT --stop flag (should succeed and stop the VM)
+    println!(
+        "Running `bcvk libvirt rm -f {}` (without --stop)...",
+        rm_test_domain
+    );
+    let rm_output =
+        run_bcvk(&["libvirt", "rm", "-f", &rm_test_domain]).expect("Failed to run libvirt rm -f");
+
+    assert!(
+        rm_output.success(),
+        "rm -f should succeed in stopping and removing running VM without --stop flag. stderr: {}",
+        rm_output.stderr
+    );
+    println!("✓ rm -f successfully stopped and removed running VM");
+
+    // Verify the VM is actually removed
+    let list_check = Command::new("virsh")
+        .args(&["list", "--all", "--name"])
+        .output()
+        .expect("Failed to list domains");
+
+    let domain_list = String::from_utf8_lossy(&list_check.stdout);
+    assert!(
+        !domain_list.contains(&rm_test_domain),
+        "VM should be removed after rm -f"
+    );
+    println!("✓ VM successfully removed from domain list");
+
+    // Test 7: Test `run --replace` replaces existing VM
+    println!("Test 7: Testing `run --replace` replaces existing VM...");
+    let replace_test_domain = create_test_vm_and_assert("test-replace", &test_image, &domain_name)?;
+
+    // Verify initial VM exists
+    let initial_list = Command::new("virsh")
+        .args(&["list", "--all", "--name"])
+        .output()
+        .expect("Failed to list domains");
+
+    let initial_domain_list = String::from_utf8_lossy(&initial_list.stdout);
+    assert!(
+        initial_domain_list.contains(&replace_test_domain),
+        "Initial VM should exist before replace"
+    );
+    println!("✓ Initial VM exists: {}", replace_test_domain);
+
+    // Run with --replace flag (should replace existing VM)
+    println!(
+        "Running `bcvk libvirt run --replace --name {}`...",
+        replace_test_domain
+    );
+    let replace_output = run_bcvk(&[
+        "libvirt",
+        "run",
+        "--replace",
+        "--name",
+        &replace_test_domain,
+        "--label",
+        LIBVIRT_INTEGRATION_TEST_LABEL,
+        "--filesystem",
+        "ext4",
+        &test_image,
+    ])
+    .expect("Failed to run libvirt run --replace");
+
+    if !replace_output.success() {
+        cleanup_domain(&replace_test_domain);
+        cleanup_domain(&domain_name);
+        panic!(
+            "Failed to replace VM with --replace flag: {}",
+            replace_output.stderr
+        );
+    }
+    println!("✓ Successfully replaced VM with --replace flag");
+
+    // Verify VM still exists with same name
+    let replaced_list = Command::new("virsh")
+        .args(&["list", "--all", "--name"])
+        .output()
+        .expect("Failed to list domains");
+
+    let replaced_domain_list = String::from_utf8_lossy(&replaced_list.stdout);
+    assert!(
+        replaced_domain_list.contains(&replace_test_domain),
+        "Replaced VM should exist with same name"
+    );
+    println!("✓ Replaced VM exists with same name");
+
+    // Verify it's a fresh VM (should be running)
+    let replaced_dominfo = Command::new("virsh")
+        .args(&["dominfo", &replace_test_domain])
+        .output()
+        .expect("Failed to run virsh dominfo for replaced VM");
+
+    let replaced_info = String::from_utf8_lossy(&replaced_dominfo.stdout);
+    assert!(
+        replaced_info.contains("running") || replaced_info.contains("idle"),
+        "Replaced VM should be running"
+    );
+    println!("✓ Replaced VM is running (fresh instance)");
+
+    // Cleanup replace test VM
+    cleanup_domain(&replace_test_domain);
+    println!("✓ Cleaned up replace test VM");
+
+    // Cleanup original domain
     cleanup_domain(&domain_name);
 
     println!("✓ Comprehensive workflow test passed");
@@ -417,6 +542,44 @@ fn cleanup_domain(domain_name: &str) {
             println!("Cleanup warning (may be expected): {}", stderr);
         }
     }
+}
+
+/// Helper function to create a test VM and assert success
+///
+/// Creates a VM using run_bcvk with the given prefix and test image.
+/// Cleans up the original domain on error and returns the created domain name.
+fn create_test_vm_and_assert(
+    domain_prefix: &str,
+    test_image: &str,
+    original_domain: &str,
+) -> Result<String> {
+    let domain_name = format!("{}-{}", domain_prefix, random_suffix());
+
+    println!("Creating test VM: {}", domain_name);
+    let create_output = run_bcvk(&[
+        "libvirt",
+        "run",
+        "--name",
+        &domain_name,
+        "--label",
+        LIBVIRT_INTEGRATION_TEST_LABEL,
+        "--filesystem",
+        "ext4",
+        test_image,
+    ])
+    .expect("Failed to create test VM");
+
+    if !create_output.success() {
+        cleanup_domain(&domain_name);
+        cleanup_domain(original_domain);
+        panic!(
+            "Failed to create test VM '{}': {}",
+            domain_name, create_output.stderr
+        );
+    }
+
+    println!("✓ Test VM created: {}", domain_name);
+    Ok(domain_name)
 }
 
 /// Check if libvirt supports readonly virtiofs (requires libvirt 11.0+)
@@ -564,13 +727,7 @@ fn test_libvirt_run_bind_storage_ro() -> Result<()> {
     let test_image = get_test_image();
 
     // Generate unique domain name for this test
-    let domain_name = format!(
-        "test-bind-storage-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-    );
+    let domain_name = format!("test-bind-storage-{}", random_suffix());
 
     println!("Testing --bind-storage-ro with domain: {}", domain_name);
 
@@ -709,13 +866,7 @@ fn test_libvirt_run_no_storage_opts_without_bind_storage() -> Result<()> {
     let test_image = get_test_image();
 
     // Generate unique domain name for this test
-    let domain_name = format!(
-        "test-no-storage-opts-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-    );
+    let domain_name = format!("test-no-storage-opts-{}", random_suffix());
 
     println!(
         "Testing that STORAGE_OPTS are not injected without --bind-storage-ro for domain: {}",
@@ -855,13 +1006,7 @@ fn test_libvirt_run_transient_vm() -> Result<()> {
     let test_image = get_test_image();
 
     // Generate unique domain name for this test
-    let domain_name = format!(
-        "test-transient-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-    );
+    let domain_name = format!("test-transient-{}", random_suffix());
 
     println!("Testing transient VM with domain: {}", domain_name);
 
@@ -1021,13 +1166,7 @@ fn test_libvirt_run_bind_mounts() -> Result<()> {
     let test_image = get_test_image();
 
     // Generate unique domain name for this test
-    let domain_name = format!(
-        "test-bind-mounts-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-    );
+    let domain_name = format!("test-bind-mounts-{}", random_suffix());
 
     println!("Testing bind mounts and kargs with domain: {}", domain_name);
 

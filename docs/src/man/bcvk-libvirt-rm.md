@@ -21,11 +21,11 @@ Remove a libvirt domain and its resources
 
 **-f**, **--force**
 
-    Force removal without confirmation
+    Force removal without confirmation (also stops running VMs)
 
 **--stop**
 
-    Remove domain even if it's running
+    Stop domain if it's running (implied by --force)
 
 <!-- END GENERATED OPTIONS -->
 
