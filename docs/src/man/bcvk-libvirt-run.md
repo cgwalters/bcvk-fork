@@ -23,6 +23,10 @@ Run a bootable container as a persistent VM
 
     Name for the VM (auto-generated if not specified)
 
+**-R**, **--replace**
+
+    Replace existing VM with same name (stop and remove if exists)
+
 **--itype**=*ITYPE*
 
     Instance type (e.g., u1.nano, u1.small, u1.medium). Overrides cpus/memory if specified.

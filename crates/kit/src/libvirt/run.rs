@@ -210,6 +210,10 @@ pub struct LibvirtRunOpts {
     #[clap(long)]
     pub name: Option<String>,
 
+    /// Replace existing VM with same name (stop and remove if exists)
+    #[clap(long, short = 'R')]
+    pub replace: bool,
+
     #[clap(
         long,
         help = "Instance type (e.g., u1.nano, u1.small, u1.medium). Overrides cpus/memory if specified."
@@ -408,7 +412,21 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, mut opts: LibvirtRunOpt
     let vm_name = match &opts.name {
         Some(name) => {
             if existing_domains.contains(name) {
-                return Err(color_eyre::eyre::eyre!("VM '{}' already exists", name));
+                if opts.replace {
+                    // Replace mode: remove the existing VM
+                    println!("Replacing existing VM '{}'...", name);
+                    crate::libvirt::rm::remove_vm_forced(
+                        global_opts,
+                        name,
+                        true, // stop if running
+                    )
+                    .with_context(|| format!("Failed to remove existing VM '{}'", name))?;
+                } else {
+                    return Err(color_eyre::eyre::eyre!(
+                        "VM '{}' already exists. Use --replace to replace it.",
+                        name
+                    ));
+                }
             }
             name.clone()
         }
