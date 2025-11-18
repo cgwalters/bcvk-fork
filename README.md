@@ -46,30 +46,36 @@ with the `containers.bootc=1` label: `bcvk images list`
 
 The libvirt commands provide comprehensive integration with libvirt infrastructure for managing bootc containers as persistent VMs.
 
-#### Running a bootc container as a libvirt VM
+#### Starting a bootc container as a libvirt VM
 
 ```bash
 # Basic libvirt VM creation with default settings (2GB RAM, 2 CPUs, 20GB disk)
-bcvk libvirt run quay.io/fedora/fedora-bootc:42
+bcvk libvirt run quay.io/centos-bootc/centos-bootc:stream10
+
+# Note requirement for --filesystem with the generic Fedora bootc base images
+bcvk libvirt run --filesystem btrfs quay.io/fedora/fedora-bootc:43
 
 # Custom VM with specific resources and name
-bcvk libvirt run --name my-fedora-vm --memory 4096 --cpus 4 --disk-size 50G quay.io/fedora/fedora-bootc:42
+bcvk libvirt run --name example-vm --memory 4096 --cpus 4 --disk-size 50G quay.io/centos-bootc/centos-bootc:stream10
 
-# Run VM with port forwarding and volume mounts
-bcvk libvirt run --name web-server --port 8080:80 --volume /host/data:/mnt/data quay.io/centos-bootc/centos-bootc:stream10
+# This example forwards a port and bind mounts content from the host
+bcvk libvirt run --name web-server --port 8080:80 --volume /host/data:/mnt/data localhost/myimage
 
-# Run VM in background and automatically SSH into it
-bcvk libvirt run --detach --ssh --name test-vm quay.io/fedora/fedora-bootc:42
+# Bind mount the host container storage for faster updates
+bcvk libvirt run --update-from-host --name devvm localhost/myimage
 ```
 
-#### Managing libvirt VMs
+#### Using and managing libvirt VMs
+
+After initializing a VM a common next step is `bcvk lbivirt ssh <vm name>`.
+bcvk defaults to injecting SSH keys via [systemd credentials](https://systemd.io/CREDENTIALS/).
+The private key is specific to the VM and is stored in the domain metadata.
+
+Other operations:
 
 ```bash
 # List all bootc-related libvirt domains
 bcvk libvirt list
-
-# SSH into a running VM
-bcvk libvirt ssh my-fedora-vm
 
 # Stop a running VM
 bcvk libvirt stop my-fedora-vm
@@ -81,19 +87,23 @@ bcvk libvirt start my-fedora-vm
 bcvk libvirt inspect my-fedora-vm
 
 # Remove a VM and its resources
-bcvk libvirt rm my-fedora-vm
+bcvk libvirt rm -f my-fedora-vm
 ```
 
-#### Advanced libvirt workflows
+## Other operations
+
+The `bcvk libvirt run` command wraps `bcvk to-disk` which in
+turns wraps `bootc install to-disk` in an ephemeral VM. In
+some cases, you may want to create a disk image directly.
 
 ```bash
-# Upload a pre-built disk image to libvirt storage
-bcvk to-disk quay.io/fedora/fedora-bootc:42 /tmp/fedora.img
-bcvk libvirt upload /tmp/fedora.img --name fedora-base
-
-# Run with custom filesystem and network settings
-bcvk libvirt run --filesystem xfs --network bridge quay.io/centos-bootc/centos-bootc:stream10
+# Generate a disk image in qcow2 format.
+bcvk to-disk --format=qcow2 localhost/my-container-image output-disk.qcow2
 ```
+
+Note that at the current time, this project is not scoped to
+output other virtualization formats. The [bootc image builder](https://github.com/osbuild/bootc-image-builder)
+is one project that offers those.
 
 ## Goals
 
