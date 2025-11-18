@@ -454,7 +454,11 @@ fn prepare_run_command_with_temp(
     cmd.args(vhost_dev);
     cmd.args([
         "-v",
-        "/usr:/run/hostusr:ro", // Bind mount host /usr as read-only
+        // The core way things work here is we run the host as a nested container
+        // inside an outer container. The rest of /run/tmproot will be populated
+        // in the entrypoint script, but we just grab the host's `/usr`.
+        // (We don't want all of `/` as that would scope in a lot more)
+        "/usr:/run/tmproot/usr:ro",
         "-v",
         &format!("{}:{}", entrypoint_path, ENTRYPOINT),
         "-v",
