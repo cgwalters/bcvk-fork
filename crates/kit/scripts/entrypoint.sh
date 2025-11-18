@@ -11,13 +11,11 @@ fi
 
 # Shell script library
 init_tmproot() {
-    if test -d /run/tmproot; then return 0; fi
-    mkdir /run/tmproot
+    if test -d /run/inner-shared; then return 0; fi
+    # Should have been created by podman when initializing
+    # the bind mount
     cd /run/tmproot
 
-    # Bind mount host /usr to our hybrid root
-    mkdir usr
-    mount --bind /run/hostusr usr
     # Create essential symlinks
     ln -sf usr/bin bin
     ln -sf usr/lib lib
