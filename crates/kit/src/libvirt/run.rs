@@ -1129,9 +1129,13 @@ fn create_libvirt_domain_from_disk(
     if let Some(ref sb_config) = secure_boot_config {
         let ovmf_code = crate::libvirt::secureboot::find_ovmf_code_secboot()
             .context("Failed to find OVMF_CODE.secboot.fd")?;
+        let sb_vars_path = sb_config
+            .vars_template
+            .canonicalize_utf8()
+            .context("Canonicalizing secureboot vars path")?;
         domain_builder = domain_builder
             .with_ovmf_code_path(ovmf_code.as_str())
-            .with_nvram_template(sb_config.vars_template.as_str());
+            .with_nvram_template(sb_vars_path.as_str());
 
         // Add secure boot keys path to metadata for reference
         domain_builder =

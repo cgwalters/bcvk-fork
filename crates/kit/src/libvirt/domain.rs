@@ -209,11 +209,12 @@ impl DomainBuilder {
             && (self.firmware == Some(FirmwareType::UefiSecure) || self.ovmf_code_path.is_some());
         let insecure_boot = self.firmware == Some(FirmwareType::UefiInsecure);
 
-        if use_uefi {
-            writer.start_element("os", &[("firmware", "efi")])?;
-        } else {
-            writer.start_element("os", &[])?;
-        }
+        // Don't use firmware="efi" when we have custom OVMF paths (secure boot with custom keys)
+        // because firmware="efi" and explicit <loader> paths are mutually exclusive
+        let os_attributes = (use_uefi && self.ovmf_code_path.is_none())
+            .then_some([("firmware", "efi")].as_slice())
+            .unwrap_or_default();
+        writer.start_element("os", os_attributes)?;
 
         // For secure boot on x86_64, we may need a specific machine type with SMM
         let machine_type = if secure_boot && arch_config.arch == "x86_64" {
@@ -231,7 +232,8 @@ impl DomainBuilder {
         if use_uefi {
             if let Some(ref ovmf_code) = self.ovmf_code_path {
                 // Use custom OVMF_CODE path for secure boot
-                let mut loader_attrs = vec![("readonly", "yes"), ("type", "pflash")];
+                let mut loader_attrs =
+                    vec![("readonly", "yes"), ("type", "pflash"), ("format", "raw")];
                 if secure_boot {
                     loader_attrs.push(("secure", "yes"));
                 }
@@ -242,7 +244,11 @@ impl DomainBuilder {
                     writer.write_text_element_with_attrs(
                         "nvram",
                         "", // Empty content, template attr provides the source
-                        &[("template", nvram_template)],
+                        &[
+                            ("template", nvram_template),
+                            ("templateFormat", "raw"),
+                            ("format", "raw"),
+                        ],
                     )?;
                 }
             } else if secure_boot {
