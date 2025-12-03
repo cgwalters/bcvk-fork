@@ -6,9 +6,10 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Parser, ValueEnum};
-use color_eyre::eyre;
+use color_eyre::eyre::{self, eyre};
 use color_eyre::{eyre::Context, Result};
 use std::fs;
+use std::io::Write;
 use std::str::FromStr;
 use tracing::{debug, info};
 
@@ -633,8 +634,13 @@ fn ensure_default_pool(connect_uri: Option<&str>) -> Result<()> {
     );
 
     // Write XML to temporary file
-    let xml_path = "/tmp/default-pool.xml";
-    std::fs::write(xml_path, &pool_xml).with_context(|| "Failed to write pool XML")?;
+    let mut tmpf = tempfile::NamedTempFile::with_prefix("bcvk-libvirt")?;
+    tmpf.write_all(pool_xml.as_bytes())
+        .with_context(|| "Failed to write pool XML")?;
+    let xml_path = tmpf
+        .path()
+        .to_str()
+        .ok_or_else(|| eyre!("Invalid UTF-8 in tempfile"))?;
 
     // Define the pool
     let mut cmd = virsh_command(connect_uri)?;
@@ -662,7 +668,6 @@ fn ensure_default_pool(connect_uri: Option<&str>) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let _ = std::fs::remove_file(xml_path);
         return Err(color_eyre::eyre::eyre!(
             "Failed to start default pool: {}",
             stderr
@@ -673,9 +678,6 @@ fn ensure_default_pool(connect_uri: Option<&str>) -> Result<()> {
     let mut cmd = virsh_command(connect_uri)?;
     cmd.args(&["pool-autostart", "default"]);
     let _ = cmd.output(); // Not critical if this fails
-
-    // Clean up temporary XML file
-    let _ = std::fs::remove_file(xml_path);
 
     info!("Default storage pool created successfully");
     Ok(())
@@ -1296,8 +1298,15 @@ fn create_libvirt_domain_from_disk(
         .with_context(|| "Failed to build domain XML")?;
 
     // Write XML to temporary file
-    let xml_path = format!("/tmp/{}.xml", domain_name);
-    std::fs::write(&xml_path, domain_xml).with_context(|| "Failed to write domain XML")?;
+    let mut tmp_domain_file = tempfile::NamedTempFile::with_prefix("bcvk-libvirt")?;
+    tmp_domain_file
+        .as_file_mut()
+        .write_all(domain_xml.as_bytes())
+        .with_context(|| "Failed to write domain XML")?;
+    let xml_path = tmp_domain_file
+        .path()
+        .to_str()
+        .ok_or_else(|| eyre!("Invalid UTF-8 in tempfile"))?;
 
     let connect_uri = global_opts.connect.as_deref();
 
@@ -1322,9 +1331,6 @@ fn create_libvirt_domain_from_disk(
             "Failed to start libvirt domain",
         )?;
     }
-
-    // Clean up temporary XML file
-    let _ = std::fs::remove_file(&xml_path);
 
     Ok(())
 }
