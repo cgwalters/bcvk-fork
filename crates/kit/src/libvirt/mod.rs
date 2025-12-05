@@ -30,6 +30,7 @@ pub mod domain;
 pub mod inspect;
 pub mod list;
 pub mod list_volumes;
+pub mod print_firmware;
 pub mod rm;
 pub mod rm_all;
 pub mod run;
@@ -220,4 +221,8 @@ pub enum LibvirtSubcommands {
     /// Manage base disk images used for VM cloning
     #[clap(name = "base-disks")]
     BaseDisks(base_disks_cli::LibvirtBaseDisksOpts),
+
+    /// Print detected firmware paths and configuration
+    #[clap(name = "print-firmware", hide = true)]
+    PrintFirmware(print_firmware::LibvirtPrintFirmwareOpts),
 }

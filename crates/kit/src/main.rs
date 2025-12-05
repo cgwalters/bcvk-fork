@@ -186,6 +186,9 @@ fn main() -> Result<(), Report> {
                 libvirt::LibvirtSubcommands::BaseDisks(opts) => {
                     libvirt::base_disks_cli::run(&options, opts)?
                 }
+                libvirt::LibvirtSubcommands::PrintFirmware(opts) => {
+                    libvirt::print_firmware::run(opts)?
+                }
             }
         }
         Commands::LibvirtUploadDisk(opts) => {
