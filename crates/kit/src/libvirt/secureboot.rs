@@ -4,7 +4,124 @@
 //! keys (PK, KEK, db) and customizing OVMF firmware variables for VMs.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use cap_std_ext::cap_std::fs::Dir;
+use cap_std_ext::dirext::{CapStdExtDirExt, WalkConfiguration};
 use color_eyre::{eyre::eyre, Result};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::ops::ControlFlow;
+
+/// System-wide QEMU firmware descriptor search directories
+const QEMU_FIRMWARE_DIRS: &[&str] = &["/etc/qemu/firmware", "/usr/share/qemu/firmware"];
+
+/// QEMU firmware descriptor executable section
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct FirmwareExecutable {
+    /// Path to the firmware file
+    pub(crate) filename: String,
+    /// Format of the firmware file (e.g., "raw")
+    pub(crate) format: String,
+}
+
+/// QEMU firmware descriptor nvram template section
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct FirmwareNvramTemplate {
+    /// Path to the NVRAM template file
+    pub(crate) filename: String,
+    /// Format of the NVRAM template file (e.g., "raw")
+    pub(crate) format: String,
+}
+
+/// QEMU firmware descriptor mapping section
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct FirmwareMapping {
+    /// Device type
+    pub(crate) device: String,
+    /// Executable (firmware) configuration (for flash device type)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) executable: Option<FirmwareExecutable>,
+    /// NVRAM template configuration (for flash device type)
+    #[serde(rename = "nvram-template", skip_serializing_if = "Option::is_none")]
+    pub(crate) nvram_template: Option<FirmwareNvramTemplate>,
+    /// Single firmware filename (for memory device type)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) filename: Option<String>,
+}
+
+impl FirmwareMapping {
+    /// QEMU firmware device type: memory-mapped
+    pub(crate) const DEVICE_TYPE_MEMORY: &'static str = "memory";
+
+    /// QEMU firmware device type: flash
+    #[allow(dead_code)]
+    pub(crate) const DEVICE_TYPE_FLASH: &'static str = "flash";
+}
+
+/// QEMU firmware descriptor target architecture
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct FirmwareTarget {
+    /// Architecture name (e.g., "x86_64", "aarch64")
+    pub(crate) architecture: String,
+    /// Supported machines
+    pub(crate) machines: Vec<String>,
+}
+
+/// QEMU firmware descriptor (QEMU firmware interop specification)
+/// See: https://qemu.readthedocs.io/en/latest/interop/firmware.json.html
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct FirmwareDescriptor {
+    /// Human-readable description
+    pub(crate) description: String,
+    /// Interface types (e.g., "uefi")
+    #[serde(rename = "interface-types")]
+    pub(crate) interface_types: Vec<String>,
+    /// Firmware mapping
+    pub(crate) mapping: FirmwareMapping,
+    /// Target architectures
+    pub(crate) targets: Vec<FirmwareTarget>,
+    /// Features (e.g., "secure-boot", "enrolled-keys")
+    pub(crate) features: Vec<String>,
+    /// Tags
+    pub(crate) tags: Vec<String>,
+}
+
+impl FirmwareDescriptor {
+    /// QEMU firmware feature: secure boot support
+    pub(crate) const FEATURE_SECURE_BOOT: &'static str = "secure-boot";
+
+    /// QEMU firmware feature: enrolled keys
+    pub(crate) const FEATURE_ENROLLED_KEYS: &'static str = "enrolled-keys";
+
+    /// Check if this firmware supports secure boot
+    pub(crate) fn supports_secure_boot(&self) -> bool {
+        self.features
+            .contains(&Self::FEATURE_SECURE_BOOT.to_string())
+    }
+
+    /// Check if this firmware has enrolled keys
+    pub(crate) fn has_enrolled_keys(&self) -> bool {
+        self.features
+            .contains(&Self::FEATURE_ENROLLED_KEYS.to_string())
+    }
+
+    /// Check if this firmware supports the given architecture
+    pub(crate) fn supports_architecture(&self, arch: &str) -> bool {
+        self.targets.iter().any(|t| t.architecture == arch)
+    }
+}
+
+/// UEFI firmware paths and formats from QEMU firmware interop descriptors
+#[derive(Debug, Clone)]
+pub struct FirmwareInfo {
+    /// Path to OVMF_CODE firmware file
+    pub code_path: Utf8PathBuf,
+    /// Format of the OVMF_CODE file (raw, qcow2)
+    pub code_format: String,
+    /// Path to OVMF_VARS template file
+    pub vars_path: Utf8PathBuf,
+    /// Format of the OVMF_VARS file (raw, qcow2)
+    pub vars_format: String,
+}
 
 /// Secure Boot key configuration
 #[derive(Debug, Clone)]
@@ -13,6 +130,8 @@ pub struct SecureBootConfig {
     pub key_dir: Utf8PathBuf,
     /// Path to custom OVMF_VARS template with enrolled keys
     pub vars_template: Utf8PathBuf,
+    /// Format of the NVRAM template file (raw, qcow2)
+    pub vars_format: String,
     /// GUID for the key owner
     #[allow(dead_code)]
     pub guid: String,
@@ -107,9 +226,7 @@ pub fn customize_ovmf_vars(
     let check_output = check.output()?;
 
     if !check_output.status.success() {
-        return Err(eyre!(
-            "virt-fw-vars not found. Install it with: dnf install -y python3-virt-firmware"
-        ));
+        return Err(eyre!("virt-fw-vars tool not found"));
     }
 
     // Use virt-fw-vars to inject keys into OVMF_VARS
@@ -144,78 +261,238 @@ pub fn customize_ovmf_vars(
 }
 
 /// Load and setup secure boot configuration from existing keys
-pub fn setup_secure_boot(key_dir: &Utf8Path) -> Result<SecureBootConfig> {
+///
+/// The `vars_output_path` should be in the libvirt storage pool so that
+/// the OVMF vars file is lifecycled with the VM (e.g., deleted with `--nvram`).
+pub fn setup_secure_boot(
+    key_dir: &Utf8Path,
+    vars_output_path: &Utf8Path,
+) -> Result<SecureBootConfig> {
     tracing::info!("Loading secure boot keys from {}", key_dir);
     let keys = SecureBootKeys::load(key_dir)?;
 
-    // Path for the customized OVMF_VARS template
-    let vars_template = key_dir.join("OVMF_VARS_CUSTOM.fd");
+    // Find the system firmware (includes format info)
+    let firmware_info = find_firmware_from_descriptors(true)?;
 
-    // Find the system OVMF_VARS.fd
-    let ovmf_vars = find_ovmf_vars()?;
-
-    // Check if custom vars template already exists
-    let mut test_template = std::process::Command::new("test");
-    test_template.args(["-f", vars_template.as_str()]);
-
-    if !test_template.status()?.success() {
-        tracing::info!("Creating custom OVMF_VARS template with enrolled keys");
-        customize_ovmf_vars(&keys, &ovmf_vars, &vars_template)?;
+    // Check if custom vars template already exists at the output path
+    if !vars_output_path.exists() {
+        tracing::info!(
+            "Creating custom OVMF_VARS template with enrolled keys at {}",
+            vars_output_path
+        );
+        customize_ovmf_vars(&keys, &firmware_info.vars_path, vars_output_path)?;
     }
 
+    // virt-fw-vars preserves the input format, so the output has the same format as the input
     Ok(SecureBootConfig {
         key_dir: key_dir.to_owned(),
-        vars_template,
+        vars_template: vars_output_path.to_owned(),
+        vars_format: firmware_info.vars_format,
         guid: keys.guid,
     })
 }
 
-/// Find the system OVMF_VARS.fd file
-fn find_ovmf_vars() -> Result<Utf8PathBuf> {
-    // Common locations for OVMF_VARS.fd
-    let locations = [
-        "/usr/share/edk2/ovmf/OVMF_VARS.fd",
-        "/usr/share/OVMF/OVMF_VARS.fd",
-        "/usr/share/qemu/OVMF_VARS.fd",
-        "/usr/share/edk2-ovmf/OVMF_VARS.fd",
-    ];
+/// Get firmware search directories following QEMU firmware interop specification
+fn get_firmware_search_dirs() -> Vec<Utf8PathBuf> {
+    let mut dirs = Vec::new();
 
-    for path in &locations {
-        let mut test_file = std::process::Command::new("test");
-        test_file.args(["-f", path]);
-
-        if test_file.status()?.success() {
-            return Ok(Utf8PathBuf::from(path));
+    // $XDG_CONFIG_HOME/qemu/firmware or $HOME/.config/qemu/firmware
+    if let Some(config_home) = std::env::var_os("XDG_CONFIG_HOME") {
+        if let Ok(mut path) = Utf8PathBuf::try_from(config_home) {
+            path.push("qemu/firmware");
+            dirs.push(path);
+        }
+    } else if let Some(home) = std::env::var_os("HOME") {
+        if let Ok(mut path) = Utf8PathBuf::try_from(home) {
+            path.push(".config/qemu/firmware");
+            dirs.push(path);
         }
     }
 
+    // System-wide directories
+    dirs.extend(QEMU_FIRMWARE_DIRS.iter().map(|d| Utf8PathBuf::from(d)));
+
+    dirs
+}
+
+/// List all firmware descriptor JSON files
+pub(crate) fn list_firmware_descriptors() -> Result<Vec<Utf8PathBuf>> {
+    let search_dirs = get_firmware_search_dirs();
+    let mut descriptors = Vec::new();
+
+    let root = Dir::open_ambient_dir("/", cap_std_ext::cap_std::ambient_authority())?;
+
+    for dir_path in search_dirs {
+        // Strip leading slash to make path relative to root Dir
+        let relative_path = dir_path
+            .as_str()
+            .strip_prefix('/')
+            .unwrap_or(dir_path.as_str());
+        // Use open_dir_optional to handle non-existent directories gracefully
+        let Some(dir) = root.open_dir_optional(relative_path)? else {
+            continue;
+        };
+
+        // Use walk with sort_by_file_name to get entries in lexical order per QEMU firmware interop spec
+        let config = WalkConfiguration::default().sort_by_file_name();
+        dir.walk::<_, color_eyre::eyre::Error>(&config, |component| {
+            // Only process regular files with .json extension at the top level
+            if component.file_type.is_file() {
+                if let Some(ext) = component.path.extension() {
+                    if ext == "json" {
+                        let full_path = dir_path.join(
+                            Utf8Path::from_path(component.path)
+                                .ok_or_else(|| eyre!("Non-UTF8 path: {:?}", component.path))?,
+                        );
+                        descriptors.push(full_path);
+                    }
+                }
+            }
+            Ok(ControlFlow::Continue(()))
+        })?;
+    }
+
+    Ok(descriptors)
+}
+
+/// Load and parse a firmware descriptor JSON file
+pub(crate) fn load_firmware_descriptor(path: &Utf8Path) -> Result<FirmwareDescriptor> {
+    let content = fs::read_to_string(path)
+        .map_err(|e| eyre!("Failed to read firmware descriptor {}: {}", path, e))?;
+
+    serde_json::from_str(&content)
+        .map_err(|e| eyre!("Failed to parse firmware descriptor {}: {}", path, e))
+}
+
+/// Get the current architecture in QEMU format
+pub(crate) fn get_qemu_architecture() -> &'static str {
+    match std::env::consts::ARCH {
+        "powerpc64" => "ppc64",
+        "powerpc64le" => "ppc64le",
+        arch => arch,
+    }
+}
+
+/// Find firmware using QEMU firmware interop JSON descriptors
+///
+/// This follows the same approach as systemd-vmspawn:
+/// - Searches in $XDG_CONFIG_HOME/qemu/firmware, /etc/qemu/firmware, /usr/share/qemu/firmware
+/// - Filters by architecture and secure boot support
+/// - Skips firmware with enrolled keys (known to cause issues)
+fn find_firmware_from_descriptors(require_secure_boot: bool) -> Result<FirmwareInfo> {
+    let descriptors = list_firmware_descriptors()?;
+    let arch = get_qemu_architecture();
+
+    for descriptor_path in descriptors {
+        let descriptor = load_firmware_descriptor(&descriptor_path)?;
+
+        // Skip firmware with enrolled keys (known to cause issues)
+        if descriptor.has_enrolled_keys() {
+            tracing::debug!(
+                "Skipping {}, firmware has enrolled keys which has been known to cause issues",
+                descriptor_path
+            );
+            continue;
+        }
+
+        // Check architecture support
+        if !descriptor.supports_architecture(arch) {
+            tracing::debug!(
+                "Skipping {}, firmware doesn't support architecture {}",
+                descriptor_path,
+                arch
+            );
+            continue;
+        }
+
+        // Check secure boot requirement
+        if require_secure_boot && !descriptor.supports_secure_boot() {
+            tracing::debug!(
+                "Skipping {}, firmware doesn't support secure boot",
+                descriptor_path
+            );
+            continue;
+        }
+
+        // Skip memory-mapped firmware (we need separate code and vars files)
+        if descriptor.mapping.device == FirmwareMapping::DEVICE_TYPE_MEMORY {
+            tracing::debug!(
+                "Skipping {}, memory-mapped firmware not supported",
+                descriptor_path
+            );
+            continue;
+        }
+
+        // Extract code and vars paths and formats from flash device firmware
+        let firmware_info = match (
+            &descriptor.mapping.executable,
+            &descriptor.mapping.nvram_template,
+        ) {
+            (Some(executable), Some(nvram_template)) => FirmwareInfo {
+                code_path: Utf8PathBuf::from(&executable.filename),
+                code_format: executable.format.clone(),
+                vars_path: Utf8PathBuf::from(&nvram_template.filename),
+                vars_format: nvram_template.format.clone(),
+            },
+            _ => {
+                tracing::debug!(
+                    "Skipping {}, missing executable or nvram-template fields",
+                    descriptor_path
+                );
+                continue;
+            }
+        };
+
+        tracing::debug!("Selected firmware definition {}", descriptor_path);
+        return Ok(firmware_info);
+    }
+
     Err(eyre!(
-        "Could not find OVMF_VARS.fd. Please install edk2-ovmf package."
+        "No suitable firmware descriptor found for architecture {} with secure_boot={}",
+        arch,
+        require_secure_boot
     ))
 }
 
-/// Find the secure boot OVMF_CODE file
-pub fn find_ovmf_code_secboot() -> Result<Utf8PathBuf> {
-    // Common locations for OVMF_CODE.secboot.fd
-    let locations = [
-        "/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd",
-        "/usr/share/OVMF/OVMF_CODE.secboot.fd",
-        "/usr/share/qemu/OVMF_CODE.secboot.fd",
-        "/usr/share/edk2-ovmf/OVMF_CODE.secboot.fd",
-    ];
+/// Find the system OVMF_VARS.fd file using QEMU firmware interop JSON descriptors
+pub(crate) fn find_ovmf_vars() -> Result<Utf8PathBuf> {
+    let firmware_info = find_firmware_from_descriptors(false)?;
 
-    for path in &locations {
-        let mut test_file = std::process::Command::new("test");
-        test_file.args(["-f", path]);
-
-        if test_file.status()?.success() {
-            return Ok(Utf8PathBuf::from(path));
-        }
+    if !firmware_info.vars_path.exists() {
+        return Err(eyre!(
+            "Firmware descriptor returned non-existent path: {}. Please verify your QEMU firmware installation.",
+            firmware_info.vars_path
+        ));
     }
 
-    Err(eyre!(
-        "Could not find OVMF_CODE.secboot.fd. Please install edk2-ovmf package."
-    ))
+    tracing::debug!(
+        "Found OVMF_VARS via firmware descriptor: {}",
+        firmware_info.vars_path
+    );
+    Ok(firmware_info.vars_path)
+}
+
+/// Find secure boot firmware using QEMU firmware interop JSON descriptors
+///
+/// Returns full firmware info including paths and formats for both CODE and VARS
+pub fn find_secure_boot_firmware() -> Result<FirmwareInfo> {
+    let firmware_info = find_firmware_from_descriptors(true)?;
+
+    if !firmware_info.code_path.exists() {
+        return Err(eyre!(
+            "Firmware descriptor returned non-existent path: {}. Please verify your QEMU firmware installation.",
+            firmware_info.code_path
+        ));
+    }
+
+    tracing::debug!(
+        "Found secure boot firmware: code={} ({}), vars={} ({})",
+        firmware_info.code_path,
+        firmware_info.code_format,
+        firmware_info.vars_path,
+        firmware_info.vars_format
+    );
+    Ok(firmware_info)
 }
 
 #[cfg(test)]

@@ -23,6 +23,16 @@ pub struct VirtiofsFilesystem {
     pub readonly: bool,
 }
 
+/// Configuration for firmware debug log output
+#[derive(Debug, Clone)]
+pub enum FirmwareLogOutput {
+    /// Write firmware log to a file on the host
+    #[allow(dead_code)]
+    File(String),
+    /// Make firmware log available via virsh console (pty)
+    Console,
+}
+
 /// Builder for creating libvirt domain XML configurations
 #[derive(Debug)]
 pub struct DomainBuilder {
@@ -41,7 +51,10 @@ pub struct DomainBuilder {
     firmware: Option<FirmwareType>,
     tpm: bool,
     ovmf_code_path: Option<String>, // Custom OVMF_CODE path for secure boot
+    ovmf_code_format: Option<String>, // Format of OVMF_CODE (raw, qcow2)
     nvram_template: Option<String>, // Custom NVRAM template with enrolled keys
+    nvram_format: Option<String>,   // Format of NVRAM template (raw, qcow2)
+    firmware_log: Option<FirmwareLogOutput>, // OVMF debug log output via isa-debugcon
 }
 
 impl Default for DomainBuilder {
@@ -69,7 +82,10 @@ impl DomainBuilder {
             firmware: None, // Defaults to UEFI
             tpm: true,      // Default to enabled
             ovmf_code_path: None,
+            ovmf_code_format: None,
             nvram_template: None,
+            nvram_format: None,
+            firmware_log: Some(FirmwareLogOutput::Console), // Default to pty for virsh console access
         }
     }
 
@@ -153,15 +169,38 @@ impl DomainBuilder {
         self
     }
 
-    /// Set custom OVMF_CODE path for secure boot
-    pub fn with_ovmf_code_path(mut self, path: &str) -> Self {
+    /// Set custom OVMF_CODE path and format for secure boot
+    ///
+    /// Format must be specified (either "raw" or "qcow2") and should come from
+    /// the QEMU firmware interop JSON descriptors.
+    pub fn with_ovmf_code_path(mut self, path: &str, format: &str) -> Self {
         self.ovmf_code_path = Some(path.to_string());
+        self.ovmf_code_format = Some(format.to_string());
         self
     }
 
-    /// Set custom NVRAM template path with enrolled secure boot keys
-    pub fn with_nvram_template(mut self, path: &str) -> Self {
+    /// Set custom NVRAM template path and format with enrolled secure boot keys
+    ///
+    /// Format must be specified (either "raw" or "qcow2") and should come from
+    /// the QEMU firmware interop JSON descriptors.
+    pub fn with_nvram_template(mut self, path: &str, format: &str) -> Self {
         self.nvram_template = Some(path.to_string());
+        self.nvram_format = Some(format.to_string());
+        self
+    }
+
+    /// Enable firmware debug log output via isa-debugcon (x86_64 only)
+    ///
+    /// This captures OVMF/EDK2 DEBUG() output which is useful for debugging
+    /// Secure Boot failures and other firmware issues. The log is available
+    /// on IO port 0x402.
+    ///
+    /// Options:
+    /// - `FirmwareLogOutput::File(path)` - Write to a file on the host
+    /// - `FirmwareLogOutput::Console` - Access via `virsh console <domain> serial1`
+    #[allow(dead_code)]
+    pub fn with_firmware_log(mut self, output: FirmwareLogOutput) -> Self {
+        self.firmware_log = Some(output);
         self
     }
 
@@ -232,8 +271,16 @@ impl DomainBuilder {
         if use_uefi {
             if let Some(ref ovmf_code) = self.ovmf_code_path {
                 // Use custom OVMF_CODE path for secure boot
-                let mut loader_attrs =
-                    vec![("readonly", "yes"), ("type", "pflash"), ("format", "raw")];
+                // Format is required and comes from QEMU firmware interop JSON descriptors
+                let code_format = self
+                    .ovmf_code_format
+                    .as_deref()
+                    .expect("ovmf_code_format must be set when ovmf_code_path is set");
+                let mut loader_attrs = vec![
+                    ("readonly", "yes"),
+                    ("type", "pflash"),
+                    ("format", code_format),
+                ];
                 if secure_boot {
                     loader_attrs.push(("secure", "yes"));
                 }
@@ -241,13 +288,18 @@ impl DomainBuilder {
 
                 // Add NVRAM element if template is specified
                 if let Some(ref nvram_template) = self.nvram_template {
+                    // Format is required and comes from QEMU firmware interop JSON descriptors
+                    let nvram_fmt = self
+                        .nvram_format
+                        .as_deref()
+                        .expect("nvram_format must be set when nvram_template is set");
                     writer.write_text_element_with_attrs(
                         "nvram",
                         "", // Empty content, template attr provides the source
                         &[
                             ("template", nvram_template),
-                            ("templateFormat", "raw"),
-                            ("format", "raw"),
+                            ("templateFormat", nvram_fmt),
+                            ("format", nvram_fmt),
                         ],
                     )?;
                 }
@@ -368,6 +420,29 @@ impl DomainBuilder {
         writer.start_element("console", &[("type", "pty")])?;
         writer.write_empty_element("target", &[("type", "virtio")])?;
         writer.end_element("console")?;
+
+        // Firmware debug log via isa-debugcon (x86_64 only)
+        // This captures OVMF/EDK2 DEBUG() output on IO port 0x402, useful for
+        // debugging Secure Boot failures. Access via: virsh console <domain> serial0
+        // See: https://libvirt.org/formatdomain.html#serial-port (isa-debug target type)
+        if arch_config.arch == "x86_64" {
+            if let Some(ref firmware_log) = self.firmware_log {
+                let (serial_type, source_path) = match firmware_log {
+                    FirmwareLogOutput::Console => ("pty", None),
+                    FirmwareLogOutput::File(path) => ("file", Some(path.as_str())),
+                };
+
+                writer.start_element("serial", &[("type", serial_type)])?;
+                if let Some(path) = source_path {
+                    writer.write_empty_element("source", &[("path", path)])?;
+                }
+                writer.start_element("target", &[("type", "isa-debug"), ("port", "0")])?;
+                writer.write_empty_element("model", &[("name", "isa-debugcon")])?;
+                writer.end_element("target")?;
+                writer.write_empty_element("address", &[("type", "isa"), ("iobase", "0x402")])?;
+                writer.end_element("serial")?;
+            }
+        }
 
         // VNC graphics if enabled
         if let Some(vnc_port) = self.vnc_port {
@@ -638,8 +713,8 @@ mod tests {
         let xml = DomainBuilder::new()
             .with_name("test-custom-secboot")
             .with_firmware(FirmwareType::UefiSecure)
-            .with_ovmf_code_path("/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd")
-            .with_nvram_template("/var/lib/libvirt/qemu/nvram/custom_VARS.fd")
+            .with_ovmf_code_path("/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd", "raw")
+            .with_nvram_template("/var/lib/libvirt/qemu/nvram/custom_VARS.fd", "raw")
             .build_xml()
             .unwrap();
 
@@ -700,5 +775,58 @@ mod tests {
         assert!(xml_ro.contains("<readonly/>"));
         assert!(xml_ro.contains("source dir=\"/host/storage\""));
         assert!(xml_ro.contains("target dir=\"hoststorage\""));
+    }
+
+    #[test]
+    fn test_firmware_log_default() {
+        // By default, firmware log should be enabled (pty/console mode)
+        let xml = DomainBuilder::new()
+            .with_name("test-firmware-log-default")
+            .build_xml()
+            .unwrap();
+
+        // On x86_64, should have isa-debugcon serial device
+        if std::env::consts::ARCH == "x86_64" {
+            assert!(xml.contains("serial type=\"pty\""));
+            assert!(xml.contains("target type=\"isa-debug\""));
+            assert!(xml.contains("model name=\"isa-debugcon\""));
+            assert!(xml.contains("address type=\"isa\" iobase=\"0x402\""));
+        }
+    }
+
+    #[test]
+    fn test_firmware_log_file() {
+        // Test firmware log to file
+        let xml = DomainBuilder::new()
+            .with_name("test-firmware-log-file")
+            .with_firmware_log(FirmwareLogOutput::File("/tmp/ovmf-debug.log".to_string()))
+            .build_xml()
+            .unwrap();
+
+        // On x86_64, should have isa-debugcon with file output
+        if std::env::consts::ARCH == "x86_64" {
+            assert!(xml.contains("serial type=\"file\""));
+            assert!(xml.contains("source path=\"/tmp/ovmf-debug.log\""));
+            assert!(xml.contains("target type=\"isa-debug\""));
+            assert!(xml.contains("model name=\"isa-debugcon\""));
+            assert!(xml.contains("address type=\"isa\" iobase=\"0x402\""));
+        }
+    }
+
+    #[test]
+    fn test_firmware_log_disabled() {
+        // Test disabling firmware log by setting firmware_log to None after construction
+        // Note: There's no public API to disable it once set, but we can test the XML
+        // generation doesn't include it on non-x86 architectures
+        let xml = DomainBuilder::new()
+            .with_name("test-firmware-log")
+            .build_xml()
+            .unwrap();
+
+        // On non-x86_64, should NOT have isa-debugcon (it's x86-only)
+        if std::env::consts::ARCH != "x86_64" {
+            assert!(!xml.contains("isa-debugcon"));
+            assert!(!xml.contains("isa-debug"));
+        }
     }
 }
