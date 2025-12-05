@@ -145,6 +145,125 @@ jobs:
           path: target/nextest/integration/junit.xml
           retention-days: 7
 
+  publish-oci-artifact:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup bootc Ubuntu environment
+        uses: ./.github/actions/bootc-ubuntu-setup
+
+      - name: Install additional dependencies
+        run: sudo apt install -y go-md2man
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+
+      - name: Build and create OCI artifact
+        run: |
+          # Build the binary
+          just build
+
+          # Create artifact with remote registry name
+          BINARY_PATH="target/release/bcvk"
+          strip "${BINARY_PATH}" || true
+          podman artifact rm ghcr.io/${{ github.repository_owner }}/bcvk 2>/dev/null || true
+          podman artifact add ghcr.io/${{ github.repository_owner }}/bcvk "${BINARY_PATH}"
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push artifact and capture digest
+        id: push
+        run: |
+          # Push artifact and capture full output
+          OUTPUT=$(podman artifact push ghcr.io/${{ github.repository_owner }}/bcvk 2>&1)
+          echo "$OUTPUT"
+
+          # Inspect the pushed artifact to get its digest
+          DIGEST=$(podman artifact inspect ghcr.io/${{ github.repository_owner }}/bcvk | jq -r '.Digest')
+          echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
+          echo "Pushed with digest: ${DIGEST}"
+
+      - name: Export digest with architecture
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.push.outputs.digest }}"
+          echo "${{ matrix.arch }}" > "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: bcvk-digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-oci-artifacts:
+    runs-on: ubuntu-24.04
+    needs: publish-oci-artifact
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: bcvk-digest-*
+          merge-multiple: true
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        run: |
+          # Create manifest list
+          podman manifest create ghcr.io/${{ github.repository_owner }}/bcvk:latest
+
+          # Add each architecture's artifact to the manifest
+          for digest_file in /tmp/digests/*; do
+            digest="sha256:$(basename ${digest_file})"
+            arch=$(cat "${digest_file}")
+            echo "Adding ${arch} artifact with digest: ${digest}"
+
+            # Add artifact with architecture annotation
+            podman manifest add --artifact --arch "${arch}" \
+              ghcr.io/${{ github.repository_owner }}/bcvk:latest \
+              ghcr.io/${{ github.repository_owner }}/bcvk@${digest}
+          done
+
+          # Push the manifest list
+          podman manifest push ghcr.io/${{ github.repository_owner }}/bcvk:latest
+
+      - name: Inspect manifest
+        run: |
+          podman manifest inspect ghcr.io/${{ github.repository_owner }}/bcvk:latest
+
   # Sentinel job for required checks - configure this job name in repository settings
   required-checks:
     if: always()

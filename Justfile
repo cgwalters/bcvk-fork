@@ -94,6 +94,25 @@ archive: build
     echo "Archive created: ${ARTIFACTS_DIR}/${TARGET_NAME}.tar.gz"
     echo "Checksum: ${ARTIFACTS_DIR}/${TARGET_NAME}.tar.gz.sha256"
 
+# Create OCI artifact and store with podman
+artifact: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ARCH=$(arch)
+    BINARY_PATH="target/release/bcvk"
+    ARTIFACT_NAME="localhost/bcvk"
+
+    # Strip the binary
+    strip "${BINARY_PATH}" || true
+
+    # Remove existing artifact if present
+    podman artifact rm "${ARTIFACT_NAME}" 2>/dev/null || true
+
+    # Create OCI artifact with the binary
+    podman artifact add "${ARTIFACT_NAME}" "${BINARY_PATH}"
+
+    echo "OCI artifact created: ${ARTIFACT_NAME}"
+
 # Install the binary to ~/.local/bin
 install: build
     cp target/release/bcvk ~/.local/bin/
