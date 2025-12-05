@@ -42,11 +42,18 @@ runs:
         # Require the runner is ubuntu-24.04
         IDV=$(. /usr/lib/os-release && echo ${ID}-${VERSION_ID})
         test "${IDV}" = "ubuntu-24.04"
-        # plucky is the next release
-        echo 'deb http://azure.archive.ubuntu.com/ubuntu plucky universe main' | sudo tee /etc/apt/sources.list.d/plucky.list
-        /bin/time -f '%E %C' sudo apt update
-        # skopeo is currently older in plucky for some reason hence --allow-downgrades
-        /bin/time -f '%E %C' sudo apt install -y --allow-downgrades crun/plucky podman/plucky skopeo/plucky just
+        # plucky is the next release - only available for amd64 currently
+        ARCH=$(arch)
+        if [ "${ARCH}" = "x86_64" ]; then
+          echo 'deb http://azure.archive.ubuntu.com/ubuntu plucky universe main' | sudo tee /etc/apt/sources.list.d/plucky.list
+          /bin/time -f '%E %C' sudo apt update
+          # skopeo is currently older in plucky for some reason hence --allow-downgrades
+          /bin/time -f '%E %C' sudo apt install -y --allow-downgrades crun/plucky podman/plucky skopeo/plucky just
+        else
+          # ARM64: use noble packages
+          /bin/time -f '%E %C' sudo apt update
+          /bin/time -f '%E %C' sudo apt install -y crun podman skopeo just
+        fi
     # This is the default on e.g. Fedora derivatives, but not Debian
     - name: Enable unprivileged /dev/kvm access
       shell: bash
