@@ -109,7 +109,7 @@ artifact: build
     podman artifact rm "${ARTIFACT_NAME}" 2>/dev/null || true
 
     # Create OCI artifact with the binary
-    podman artifact add --file-type application/octet-stream "${ARTIFACT_NAME}" "${BINARY_PATH}"
+    podman artifact add "${ARTIFACT_NAME}" "${BINARY_PATH}"
 
     echo "OCI artifact created: ${ARTIFACT_NAME}"
 

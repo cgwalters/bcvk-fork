@@ -32,7 +32,7 @@ runs:
         done
         # Apt removals in foreground, as we can't parallelize these
         for x in ${unwanted_pkgs[@]}; do
-          /bin/time -f '%E %C' sudo apt-get remove -y $x
+          /bin/time -f '%E %C' sudo apt-get remove -y $x || true
         done
     # We really want support for heredocs
     - name: Update podman and install just
