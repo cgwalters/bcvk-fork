@@ -959,6 +959,66 @@ fn test_libvirt_run_no_storage_opts_without_bind_storage() -> Result<()> {
 }
 integration_test!(test_libvirt_run_no_storage_opts_without_bind_storage);
 
+/// Test print-firmware command (hidden debugging command)
+fn test_libvirt_print_firmware() -> Result<()> {
+    let bck = get_bck_command()?;
+
+    // Test YAML output (default)
+    let yaml_output = Command::new(&bck)
+        .args(["libvirt", "print-firmware"])
+        .output()
+        .expect("Failed to run libvirt print-firmware");
+
+    let stdout = String::from_utf8_lossy(&yaml_output.stdout);
+    let stderr = String::from_utf8_lossy(&yaml_output.stderr);
+
+    // Should succeed and produce YAML output
+    assert!(
+        yaml_output.status.success(),
+        "libvirt print-firmware should succeed. stderr: {}",
+        stderr
+    );
+
+    // Verify YAML output contains expected fields
+    assert!(
+        stdout.contains("architecture:"),
+        "YAML output should contain architecture field"
+    );
+
+    println!("libvirt print-firmware YAML output:\n{}", stdout);
+
+    // Test JSON output
+    let json_output = Command::new(&bck)
+        .args(["libvirt", "print-firmware", "--format", "json"])
+        .output()
+        .expect("Failed to run libvirt print-firmware --format json");
+
+    let json_stdout = String::from_utf8_lossy(&json_output.stdout);
+
+    if json_output.status.success() {
+        // Verify it's valid JSON
+        let json_result: std::result::Result<serde_json::Value, _> =
+            serde_json::from_str(&json_stdout);
+        assert!(
+            json_result.is_ok(),
+            "libvirt print-firmware --format json should produce valid JSON: {}",
+            json_stdout
+        );
+
+        let json_value = json_result.unwrap();
+        assert!(
+            json_value.get("architecture").is_some(),
+            "JSON output should contain architecture field"
+        );
+
+        println!("libvirt print-firmware JSON output:\n{}", json_stdout);
+    }
+
+    println!("libvirt print-firmware test passed");
+    Ok(())
+}
+integration_test!(test_libvirt_print_firmware);
+
 /// Test error handling for invalid configurations
 fn test_libvirt_error_handling() -> Result<()> {
     let bck = get_bck_command()?;
