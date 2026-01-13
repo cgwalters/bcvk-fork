@@ -6,6 +6,41 @@
 use clap::Parser;
 use color_eyre::Result;
 
+/// Check if a domain is persistent (vs transient)
+///
+/// Returns true if the domain is persistent, false if transient.
+/// Transient domains disappear when destroyed, so they don't need undefine.
+fn is_domain_persistent(
+    global_opts: &crate::libvirt::LibvirtOptions,
+    vm_name: &str,
+) -> Result<bool> {
+    let output = global_opts
+        .virsh_command()
+        .args(&["dominfo", vm_name])
+        .output()
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to get domain info: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(color_eyre::eyre::eyre!(
+            "Failed to get domain info for '{}': {}",
+            vm_name,
+            stderr
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Look for "Persistent:     yes" or "Persistent:     no"
+    for line in stdout.lines() {
+        if let Some(value) = line.strip_prefix("Persistent:") {
+            return Ok(value.trim() == "yes");
+        }
+    }
+
+    // Default to persistent if we can't determine
+    Ok(true)
+}
+
 /// Options for removing a libvirt domain
 #[derive(Debug, Parser)]
 pub struct LibvirtRmOpts {
@@ -29,6 +64,7 @@ fn remove_vm_impl(
     global_opts: &crate::libvirt::LibvirtOptions,
     vm_name: &str,
     state: &str,
+    is_persistent: bool,
     domain_info: &crate::domain_list::PodmanBootcDomain,
     stop_if_running: bool,
 ) -> Result<()> {
@@ -50,6 +86,11 @@ fn remove_vm_impl(
                     vm_name,
                     stderr
                 ));
+            }
+
+            // Transient VMs disappear after destroy, so we're done
+            if !is_persistent {
+                return Ok(());
             }
         } else {
             return Err(color_eyre::eyre::eyre!(
@@ -104,16 +145,31 @@ pub fn remove_vm_forced(
     };
 
     // Check if domain exists and get its state
-    let state = lister
-        .get_domain_state(vm_name)
-        .map_err(|_| color_eyre::eyre::eyre!("VM '{}' not found", vm_name))?;
+    let state = match lister.get_domain_state(vm_name) {
+        Ok(s) => s,
+        Err(_) => {
+            // Domain doesn't exist - this is OK for replace scenarios
+            // where a transient VM was already destroyed
+            return Ok(());
+        }
+    };
+
+    // Check if domain is persistent (transient VMs disappear after destroy)
+    let is_persistent = is_domain_persistent(global_opts, vm_name)?;
 
     // Get domain info for disk cleanup
     let domain_info = lister
         .get_domain_info(vm_name)
         .with_context(|| format!("Failed to get info for VM '{}'", vm_name))?;
 
-    remove_vm_impl(global_opts, vm_name, &state, &domain_info, stop_if_running)
+    remove_vm_impl(
+        global_opts,
+        vm_name,
+        &state,
+        is_persistent,
+        &domain_info,
+        stop_if_running,
+    )
 }
 
 /// Execute the libvirt rm command
@@ -131,6 +187,9 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRmOpts) ->
     let state = lister
         .get_domain_state(&opts.name)
         .map_err(|_| color_eyre::eyre::eyre!("VM '{}' not found", opts.name))?;
+
+    // Check if domain is persistent (transient VMs disappear after destroy)
+    let is_persistent = is_domain_persistent(global_opts, &opts.name)?;
 
     // Get domain info for display
     let domain_info = lister
@@ -175,6 +234,7 @@ pub fn run(global_opts: &crate::libvirt::LibvirtOptions, opts: LibvirtRmOpts) ->
         global_opts,
         &opts.name,
         &state,
+        is_persistent,
         &domain_info,
         opts.stop || opts.force,
     )?;

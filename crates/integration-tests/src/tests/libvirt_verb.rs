@@ -1211,6 +1211,128 @@ fn test_libvirt_run_transient_vm() -> Result<()> {
 }
 integration_test!(test_libvirt_run_transient_vm);
 
+/// Test transient VM with --replace functionality
+///
+/// This tests that `bcvk libvirt run --transient --replace` works correctly:
+/// 1. Create a transient VM
+/// 2. Replace it with another transient VM using --replace
+/// 3. Verify the replacement works (no errors about undefine on transient domains)
+fn test_libvirt_run_transient_replace() -> Result<()> {
+    let test_image = get_test_image();
+
+    // Generate unique domain name for this test
+    let domain_name = format!("test-transient-replace-{}", random_suffix());
+
+    println!(
+        "Testing transient VM with --replace, domain: {}",
+        domain_name
+    );
+
+    // Cleanup any existing domain with this name
+    cleanup_domain(&domain_name);
+
+    // Create initial transient domain
+    println!("Creating initial transient domain...");
+    let create_output = run_bcvk(&[
+        "libvirt",
+        "run",
+        "--name",
+        &domain_name,
+        "--label",
+        LIBVIRT_INTEGRATION_TEST_LABEL,
+        "--transient",
+        "--filesystem",
+        "ext4",
+        &test_image,
+    ])
+    .expect("Failed to run libvirt run with --transient");
+
+    if !create_output.success() {
+        cleanup_domain(&domain_name);
+        panic!(
+            "Failed to create initial transient domain: {}",
+            create_output.stderr
+        );
+    }
+    println!("✓ Initial transient domain created: {}", domain_name);
+
+    // Verify domain is transient
+    let dominfo_output = Command::new("virsh")
+        .args(&["dominfo", &domain_name])
+        .output()
+        .expect("Failed to run virsh dominfo");
+
+    let dominfo = String::from_utf8_lossy(&dominfo_output.stdout);
+    assert!(
+        dominfo.contains("Persistent:") && dominfo.contains("no"),
+        "Domain should be transient. dominfo: {}",
+        dominfo
+    );
+    println!("✓ Initial domain is transient (Persistent: no)");
+
+    // Now replace the transient domain with another transient domain
+    println!("Replacing transient domain with --transient --replace...");
+    let replace_output = run_bcvk(&[
+        "libvirt",
+        "run",
+        "--name",
+        &domain_name,
+        "--label",
+        LIBVIRT_INTEGRATION_TEST_LABEL,
+        "--transient",
+        "--replace",
+        "--filesystem",
+        "ext4",
+        &test_image,
+    ])
+    .expect("Failed to run libvirt run with --transient --replace");
+
+    println!("Replace stdout: {}", replace_output.stdout);
+    println!("Replace stderr: {}", replace_output.stderr);
+
+    if !replace_output.success() {
+        cleanup_domain(&domain_name);
+        panic!(
+            "Failed to replace transient domain: {}",
+            replace_output.stderr
+        );
+    }
+    println!("✓ Successfully replaced transient domain");
+
+    // Verify the new domain exists and is transient
+    let dominfo_output = Command::new("virsh")
+        .args(&["dominfo", &domain_name])
+        .output()
+        .expect("Failed to run virsh dominfo after replace");
+
+    if !dominfo_output.status.success() {
+        cleanup_domain(&domain_name);
+        panic!("Domain should exist after --transient --replace");
+    }
+
+    let dominfo = String::from_utf8_lossy(&dominfo_output.stdout);
+    assert!(
+        dominfo.contains("Persistent:") && dominfo.contains("no"),
+        "Replaced domain should still be transient. dominfo: {}",
+        dominfo
+    );
+    println!("✓ Replaced domain is transient (Persistent: no)");
+
+    // Verify it's running
+    assert!(
+        dominfo.contains("running") || dominfo.contains("idle"),
+        "Replaced transient domain should be running. dominfo: {}",
+        dominfo
+    );
+    println!("✓ Replaced transient domain is running");
+
+    // Cleanup
+    cleanup_domain(&domain_name);
+    println!("✓ Transient --replace test passed");
+    Ok(())
+}
+integration_test!(test_libvirt_run_transient_replace);
+
 /// Test automatic bind mount functionality with systemd mount units
 /// Also validates kernel argument (--karg) functionality
 fn test_libvirt_run_bind_mounts() -> Result<()> {
