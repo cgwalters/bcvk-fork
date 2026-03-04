@@ -414,3 +414,59 @@ fn test_run_ephemeral_ssh_timeout() -> Result<()> {
     Ok(())
 }
 integration_test!(test_run_ephemeral_ssh_timeout);
+
+/// Test systemd health across all configured test images
+///
+/// Checks two things for each image in BCVK_ALL_IMAGES:
+/// 1. `systemctl is-system-running` reports "running" (not "degraded"),
+///    which would indicate failed units from bad mount ordering etc.
+/// 2. No "ordering cycle" messages in the journal, which would indicate
+///    conflicting Before=/After= dependencies between units.
+fn test_systemd_health_cross_distro(image: &str) -> Result<()> {
+    let sh = shell()?;
+    let bck = get_bck_command()?;
+    let label = INTEGRATION_TEST_LABEL;
+
+    // Check system state. We use `|| true` because systemctl is-system-running
+    // exits non-zero when degraded, and we want the output for the assertion
+    // message rather than a generic xshell error.
+    let check_script = "status=$(systemctl is-system-running || true); echo \"status=$status\"; if [ \"$status\" != running ]; then systemctl --failed --no-pager; fi; journalctl -b --no-pager -p warning -g 'ordering cycle|Breaking ordering cycle' || true";
+
+    let stdout = cmd!(
+        sh,
+        "{bck} ephemeral run-ssh --label {label} {image} -- /bin/sh -c {check_script}"
+    )
+    .read()?;
+
+    // Extract system status from "status=..." line
+    let status = stdout
+        .lines()
+        .find(|line| line.starts_with("status="))
+        .and_then(|line| line.strip_prefix("status="))
+        .unwrap_or("unknown");
+
+    // Collect any ordering cycle lines (everything after the status line
+    // that looks like a journal entry)
+    let cycle_lines: Vec<&str> = stdout
+        .lines()
+        .filter(|line| line.contains("ordering cycle") || line.contains("Breaking ordering cycle"))
+        .collect();
+
+    assert_eq!(
+        status, "running",
+        "systemd is not in 'running' state on image {} (got '{}').\nFull output:\n{}",
+        image, status, stdout
+    );
+
+    assert!(
+        cycle_lines.is_empty(),
+        "Found systemd ordering cycle(s) on image {}:\n{}",
+        image,
+        cycle_lines.join("\n")
+    );
+
+    eprintln!("Image {} systemd health: OK", image);
+
+    Ok(())
+}
+parameterized_integration_test!(test_systemd_health_cross_distro);
